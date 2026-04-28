@@ -1,0 +1,118 @@
+name: Release main
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  test-publish:
+    name: test-publish
+    runs-on: ubuntu-latest
+    outputs:
+      artifact: ${{ steps.package.outputs.artifact }}
+      sha: ${{ steps.package.outputs.sha }}
+      tag: ${{ steps.package.outputs.tag }}
+      version: ${{ steps.package.outputs.version }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Read package version
+        id: package
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          sha="$(git rev-parse HEAD)"
+          tag="v${version}"
+          artifact="grate-bot-${tag}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "artifact=${artifact}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify release tag is unused
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.package.outputs.tag }}
+        run: |
+          if gh release view "${TAG}" >/dev/null 2>&1 || git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::Release ${TAG} already exists. Bump Cargo.toml version before releasing again."
+            exit 1
+          fi
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Check project
+        run: cargo check --locked
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Build release binary
+        run: cargo build --locked --release --bin grate-bot
+
+      - name: Package release artifact
+        env:
+          ARTIFACT: ${{ steps.package.outputs.artifact }}
+          TAG: ${{ steps.package.outputs.tag }}
+        run: |
+          mkdir -p "dist/${TAG}"
+          cp target/release/grate-bot "dist/${TAG}/grate-bot"
+          cp README.md "dist/${TAG}/README.md"
+          cp .env.example "dist/${TAG}/.env.example"
+          tar -C dist -czf "dist/${ARTIFACT}" "${TAG}"
+
+      - name: Upload test-publish artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact }}
+          path: dist/${{ steps.package.outputs.artifact }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    needs: test-publish
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.test-publish.outputs.artifact }}
+          path: dist
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT: ${{ needs.test-publish.outputs.artifact }}
+          TAG: ${{ needs.test-publish.outputs.tag }}
+          SHA: ${{ needs.test-publish.outputs.sha }}
+          VERSION: ${{ needs.test-publish.outputs.version }}
+        run: |
+          git tag "${TAG}" "${SHA}"
+          git push origin "${TAG}"
+          gh release create "${TAG}" \
+            "dist/${ARTIFACT}" \
+            --target "${SHA}" \
+            --title "grate-bot ${VERSION}" \
+            --generate-notes
