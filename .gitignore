@@ -1,4 +1,6 @@
 /target
+/dist
 .env
 .idea/
 .DS_Store
+LLM_README.md

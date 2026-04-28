@@ -4,11 +4,15 @@ Bot for various Grate shenanigans.
 
 ## Features
 
-### Grateic
+- Grateic: a small Grateic Phone-style drawing-and-prompt game.
+- Build verification: a command for checking the running bot binary.
+- Hytale management: simple Discord commands for trusted users to manage a co-hosted Hytale server.
 
-Grateic is a small Grateic Phone-style drawing-and-prompt game.
+## Grateic
 
-Commands:
+Grateic runs a drawing-and-prompt game inside Discord. Players join from the server channel, then submit prompts and drawings in DMs.
+
+### Grateic Commands
 
 - `/grate grateic create preset:<square|portrait|landscape> background:<color-preset> custom_background:<#RRGGBB?>`
 - `/grate grateic join`
@@ -49,13 +53,13 @@ Commands:
 
 `/grate verify` reports the running bot's Cargo package version, source ref, build commit, build input state, and SHA-256 checksum of the executable. Users can compare the checksum against the binary you publish for a release.
 
-## Server Buttons
+### Server Buttons
 
 Lobby and status messages in the server include `Join`, `Status`, and `Start` buttons, so players do not need to type every command. The game reveal is posted in the channel where `/grate grateic create` was run.
 
 DM assignment messages include a `Status` button for checking the game without returning to the server channel.
 
-## Game Rules
+### Game Rules
 
 Games are stored in memory and reset when the bot restarts. Only one Grateic game can be active per server, and a Discord user can only be enrolled in one active Grateic game across the bot.
 
@@ -74,22 +78,27 @@ For `N` players, the game runs `2N + 1` rounds. After every chain is titled, the
 
 If the bot cannot DM a next-round assignment, the game does not advance. Players can fix DMs and have any player DM the bot again to retry assignment delivery.
 
-## Validation
+### Grateic Validation
 
 The bot rejects duplicate submissions, submissions from non-players, text when an image is required, image-less messages when a drawing is required, invalid custom hex colors, and submissions after the game has ended.
 
-## Setup
+## Hytale Management
 
-1. Create a Discord application and bot token in the Discord Developer Portal.
-2. Enable the bot's Message Content Intent so it can read DM submissions.
-3. Copy `.env.example` to `.env` and set `DISCORD_TOKEN`.
-4. Run the bot:
+The Hytale commands are for trusted server helpers to check on the Hytale server or nudge it when it needs basic care.
 
-```sh
-cargo run
-```
+### Hytale Commands
 
-Slash commands are registered globally, so Discord can take a little while to show new or changed commands.
+- `/grate hytale status`: check whether the Hytale server is running.
+- `/grate hytale logs`: show recent server messages for quick troubleshooting.
+- `/grate hytale start`: start the Hytale server.
+- `/grate hytale stop`: stop the Hytale server.
+- `/grate hytale restart`: restart the Hytale server.
+
+You need the Hytale manager role to use these commands.
+
+## Maintainers
+
+Setup and deployment notes live in [MAINTAINER_SETUP.md](MAINTAINER_SETUP.md).
 
 ## Testing
 

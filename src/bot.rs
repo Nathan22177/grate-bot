@@ -1,4 +1,7 @@
-use crate::features::grateic::{self as grateic_feature, grateic};
+use crate::features::{
+    grateic::{self as grateic_feature, grateic},
+    hytale::hytale,
+};
 use anyhow::Context as AnyhowContext;
 use poise::serenity_prelude as serenity;
 use serenity::{FullEvent, GatewayIntents};
@@ -60,7 +63,7 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[poise::command(slash_command, subcommands("grateic", "verify"))]
+#[poise::command(slash_command, subcommands("grateic", "verify", "hytale"))]
 async fn grate(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
