@@ -2,7 +2,7 @@ use crate::bot::Context;
 use anyhow::Context as AnyhowContext;
 use poise::serenity_prelude as serenity;
 use serenity::RoleId;
-use std::{borrow::Cow, process::ExitStatus, time::Duration};
+use std::{process::ExitStatus, time::Duration};
 use tokio::{process::Command, time::timeout};
 
 type Error = anyhow::Error;
@@ -220,8 +220,8 @@ async fn hytale_config_for(ctx: Context<'_>) -> Result<Option<HytaleConfig>, Err
     Ok(Some(config))
 }
 
-fn member_has_role(member: &Cow<'_, serenity::Member>, role_id: RoleId) -> bool {
-    member.roles.iter().any(|role| *role == role_id)
+fn member_has_role(member: &serenity::Member, role_id: RoleId) -> bool {
+    member.roles.contains(&role_id)
 }
 
 async fn service_status(config: &HytaleConfig) -> Result<String, Error> {
