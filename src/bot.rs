@@ -2,6 +2,8 @@ use crate::features::grateic::{self as grateic_feature, grateic};
 use anyhow::Context as AnyhowContext;
 use poise::serenity_prelude as serenity;
 use serenity::{FullEvent, GatewayIntents};
+use sha2::{Digest, Sha256};
+use std::{fmt::Write as _, path::Path};
 
 type Error = anyhow::Error;
 pub(crate) type Context<'a> = poise::Context<'a, Data, Error>;
@@ -58,7 +60,38 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[poise::command(slash_command, subcommands("grateic"))]
+#[poise::command(slash_command, subcommands("grateic", "verify"))]
 async fn grate(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
+}
+
+#[poise::command(slash_command)]
+async fn verify(ctx: Context<'_>) -> Result<(), Error> {
+    let exe_path = std::env::current_exe().context("could not locate the running executable")?;
+    let checksum = sha256_file(&exe_path)
+        .with_context(|| format!("could not checksum {}", exe_path.display()))?;
+
+    ctx.say(format!(
+        "Build verification\nVersion: `{}`\nSource ref: `{}`\nCommit: `{}`\nBuild inputs: `{}`\nExecutable SHA-256: `{}`",
+        env!("CARGO_PKG_VERSION"),
+        option_env!("BUILD_SOURCE_REF").unwrap_or("unknown"),
+        option_env!("BUILD_COMMIT").unwrap_or("unknown"),
+        option_env!("BUILD_INPUT_STATE").unwrap_or("unknown"),
+        checksum
+    ))
+    .await?;
+
+    Ok(())
+}
+
+fn sha256_file(path: &Path) -> anyhow::Result<String> {
+    let bytes = std::fs::read(path)?;
+    let digest = Sha256::digest(bytes);
+
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(&mut hex, "{byte:02x}")?;
+    }
+
+    Ok(hex)
 }

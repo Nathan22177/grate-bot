@@ -7,6 +7,8 @@ edition = "2024"
 anyhow = "1.0"
 dotenvy = "0.15"
 image = { version = "0.25", default-features = false, features = ["png"] }
-poise = "0.6"
+poise = { version = "0.6", default-features = false, features = ["cache", "chrono", "handle_panics"] }
+serenity = { version = "0.12.5", default-features = false, features = ["native_tls_backend"] }
+sha2 = "0.10"
 thiserror = "2.0"
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal"] }
