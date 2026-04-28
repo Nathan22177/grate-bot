@@ -1,12 +1,12 @@
-use crate::features::{
-    grateic::{self as grateic_feature, create, grateic},
-    hytale::hytale,
-};
+use crate::features::grateic::{self as grateic_feature, create, grateic};
 use anyhow::Context as AnyhowContext;
 use poise::serenity_prelude as serenity;
 use serenity::{FullEvent, GatewayIntents};
 use sha2::{Digest, Sha256};
 use std::{fmt::Write as _, path::Path};
+
+#[cfg(feature = "hytale")]
+use crate::features::hytale::hytale;
 
 type Error = anyhow::Error;
 pub(crate) type Context<'a> = poise::Context<'a, Data, Error>;
@@ -63,9 +63,16 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[poise::command(
-    slash_command,
-    subcommands("help", "create", "grateic", "verify", "hytale")
+#[cfg_attr(
+    feature = "hytale",
+    poise::command(
+        slash_command,
+        subcommands("help", "create", "grateic", "verify", "hytale")
+    )
+)]
+#[cfg_attr(
+    not(feature = "hytale"),
+    poise::command(slash_command, subcommands("help", "create", "grateic", "verify"))
 )]
 async fn grate(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
@@ -108,21 +115,30 @@ fn sha256_file(path: &Path) -> anyhow::Result<String> {
     Ok(hex)
 }
 
-fn help_message() -> &'static str {
-    "Grate Boss help\n\
+fn help_message() -> String {
+    let message = "Grate Boss help\n\
 \n\
 Broadly, I can help with:\n\
 	- Grateic: host a Discord drawing-and-prompt game. Create a short or full lobby, let players join, start rounds, collect text and drawing submissions in DMs, track status, cancel a lobby, and reveal the finished game.\n\
-- Hytale management: for trusted server helpers, check the Hytale server status, read recent logs, and start, stop, or restart the service.\n\
 - Build verification: show the running bot version, source ref, commit, build input state, and executable SHA-256 so you can compare the live bot against a release.\n\
 \n\
 Useful commands:\n\
 	- `/grate create` starts a Grateic lobby with mode, canvas size, background, and canvas-size-rule options.\n\
 	- `/grate grateic help`, `/grate grateic join`, `/grate grateic ready`, `/grate grateic start`, `/grate grateic status`, and `/grate grateic cancel` explain or manage a Grateic game.\n\
-	- `/grate hytale help`, `/grate hytale status`, `/grate hytale logs`, `/grate hytale start`, `/grate hytale stop`, and `/grate hytale restart` explain or manage the Hytale server if you have permission.\n\
 - `/grate verify` reports what build is currently running.\n\
 \n\
-Notes: Grateic game state is kept in memory, so active games reset if I restart. Hytale controls only work for users with the configured manager role."
+Notes: Grateic game state is kept in memory, so active games reset if I restart."
+        .to_owned();
+
+    #[cfg(feature = "hytale")]
+    {
+        let mut message = message;
+        message.push_str("\n\nOptional Hytale management is enabled in this build. Trusted server helpers can use `/grate hytale help`, `/grate hytale status` (unstable), `/grate hytale logs` (unstable), `/grate hytale start` (unstable), `/grate hytale stop` (unstable), and `/grate hytale restart` (unstable) if they have the configured manager role.");
+        message
+    }
+
+    #[cfg(not(feature = "hytale"))]
+    message
 }
 
 #[cfg(test)]
@@ -134,9 +150,13 @@ mod tests {
         let message = help_message();
 
         assert!(message.contains("Grateic"));
-        assert!(message.contains("Hytale management"));
         assert!(message.contains("Build verification"));
         assert!(message.contains("/grate verify"));
+
+        #[cfg(feature = "hytale")]
         assert!(message.contains("/grate hytale status"));
+
+        #[cfg(not(feature = "hytale"))]
+        assert!(!message.contains("/grate hytale status"));
     }
 }

@@ -3,6 +3,10 @@ name = "grate-bot"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+hytale = []
+
 [dependencies]
 anyhow = "1.0"
 dotenvy = "0.15"

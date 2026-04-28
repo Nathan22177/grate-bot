@@ -1,0 +1,19 @@
+[Unit]
+Description=Grate Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=grate-bot
+Group=grate-bot
+WorkingDirectory=/opt/grate-bot
+EnvironmentFile=/etc/grate-bot/grate-bot.env
+ExecStart=/opt/grate-bot/grate-bot
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
