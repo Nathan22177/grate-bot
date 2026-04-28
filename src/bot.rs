@@ -1,5 +1,5 @@
 use crate::features::{
-    grateic::{self as grateic_feature, grateic},
+    grateic::{self as grateic_feature, create, grateic},
     hytale::hytale,
 };
 use anyhow::Context as AnyhowContext;
@@ -63,7 +63,7 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[poise::command(slash_command, subcommands("grateic", "verify", "hytale"))]
+#[poise::command(slash_command, subcommands("create", "grateic", "verify", "hytale"))]
 async fn grate(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
