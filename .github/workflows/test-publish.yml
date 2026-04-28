@@ -1,4 +1,4 @@
-name: Test publish
+name: test-publish
 
 on:
   pull_request:
@@ -27,6 +27,8 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -44,11 +46,20 @@ jobs:
       - name: Check project
         run: cargo check --locked
 
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
       - name: Run tests
         run: cargo test --locked
 
       - name: Build release binary
         run: cargo build --locked --release --bin grate-bot
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit dependencies
+        run: cargo audit
 
       - name: Package test-publish artifact
         env:
