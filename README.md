@@ -4,14 +4,8 @@ Bot for various Grate shenanigans.
 
 ## Features
 
-<<<<<<< Updated upstream
-### Grateic
-
-Grateic is a small Grateic Phone-style drawing-and-prompt game.
-
-Commands:
-=======
 - Grateic: a small Grateic Phone-style drawing-and-prompt game.
+- Build verification: a command for checking the running bot binary.
 - Hytale management: simple Discord commands for trusted users to manage a co-hosted Hytale server.
 
 ## Grateic
@@ -19,7 +13,6 @@ Commands:
 Grateic runs a drawing-and-prompt game inside Discord. Players join from the server channel, then submit prompts and drawings in DMs.
 
 ### Grateic Commands
->>>>>>> Stashed changes
 
 - `/grate grateic create preset:<square|portrait|landscape> background:<color-preset> custom_background:<#RRGGBB?>`
 - `/grate grateic join`

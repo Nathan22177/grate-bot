@@ -63,11 +63,7 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-<<<<<<< Updated upstream
-#[poise::command(slash_command, subcommands("grateic", "verify"))]
-=======
-#[poise::command(slash_command, subcommands("grateic", "hytale"))]
->>>>>>> Stashed changes
+#[poise::command(slash_command, subcommands("grateic", "verify", "hytale"))]
 async fn grate(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
