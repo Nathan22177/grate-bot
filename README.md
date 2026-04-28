@@ -2,11 +2,13 @@
 
 Bot for various Grate shenanigans.
 
-## Grateic MVP
+## Features
 
-This is a Rust Discord bot that runs a small Grateic Phone-style drawing-and-prompt game.
+### Grateic
 
-## Commands
+Grateic is a small Grateic Phone-style drawing-and-prompt game.
+
+Commands:
 
 - `/grate grateic create preset:<square|portrait|landscape> background:<color-preset> custom_background:<#RRGGBB?>`
 - `/grate grateic join`
@@ -15,7 +17,13 @@ This is a Rust Discord bot that runs a small Grateic Phone-style drawing-and-pro
 - `/grate grateic status`
 - `/grate grateic cancel`
 
-Canvas presets:
+Arguments for `/grate grateic create`:
+
+- `preset`: canvas size preset.
+- `background`: background color preset.
+- `custom_background`: required only when `background` is `custom hex`; must use `#RRGGBB`.
+
+Canvas size presets:
 
 - `square`: `1024x1024`
 - `portrait`: `1080x1920`
@@ -31,7 +39,15 @@ Background choices:
 - `pale pink (#fce7f3)`
 - `custom hex`
 
-`custom_background` is only required when `background` is `custom hex`, and must use `#RRGGBB`.
+### Build Verification
+
+Build verification lets users inspect the running bot build and compare it against a published release artifact.
+
+Commands:
+
+- `/grate verify`
+
+`/grate verify` reports the running bot's Cargo package version, source ref, build commit, build input state, and SHA-256 checksum of the executable. Users can compare the checksum against the binary you publish for a release.
 
 ## Server Buttons
 
