@@ -3,8 +3,8 @@
 Discord bot for Grate server utilities:
 
 - Grateic drawing-and-prompt games
-- Hytale server management for trusted helpers
 - Build verification for the running bot binary
+- Optional Hytale server management for trusted helpers when the bot is built with Hytale support
 
 ## Commands
 
@@ -54,18 +54,18 @@ Background choices:
 - `pale pink (#fce7f3)`
 - `custom hex`
 
-### Hytale
+### Optional Hytale
 
 | Command | Purpose |
 | --- | --- |
 | `/grate hytale help` | Explain Hytale commands, settings, permissions, operations flow, and troubleshooting. |
-| `/grate hytale status` | Check whether the Hytale service is running and enabled on boot. |
-| `/grate hytale logs` | Show recent service logs. |
-| `/grate hytale start` | Start the Hytale service. |
-| `/grate hytale stop` | Stop the Hytale service. |
-| `/grate hytale restart` | Restart the Hytale service. |
+| `/grate hytale status` (unstable) | Check whether the Hytale service is running and enabled on boot. |
+| `/grate hytale logs` (unstable) | Show recent service logs. |
+| `/grate hytale start` (unstable) | Start the Hytale service. |
+| `/grate hytale stop` (unstable) | Stop the Hytale service. |
+| `/grate hytale restart` (unstable) | Restart the Hytale service. |
 
-Hytale management commands require the configured Hytale manager role. The help command is available without that role so people can discover the setup and permission requirements.
+Hytale commands are optional and only exist in builds made with `--features hytale`. Operational Hytale commands are marked unstable for now. Management commands require the configured Hytale manager role. The help command is available without that role so people can discover the setup and permission requirements.
 
 ### Build Verification
 
@@ -137,9 +137,13 @@ The bot rejects:
 
 If the bot cannot DM next-round assignments, the game does not advance. Players can fix DMs and have any player DM the bot again to retry assignment delivery.
 
-## Hytale Operations
+## Optional Hytale Operations
 
-Hytale commands are for trusted helpers to check or nudge a co-hosted Hytale service.
+Hytale commands are for trusted helpers to check or nudge a co-hosted Hytale service. They are not part of the default bot build. Server maintainers can enable them by building with:
+
+```sh
+cargo build --release --features hytale
+```
 
 Default settings:
 
@@ -147,16 +151,16 @@ Default settings:
 | --- | --- | --- |
 | `HYTALE_MANAGER_ROLE_ID` | Required | Discord role allowed to use Hytale management commands. |
 | `HYTALE_SERVICE_NAME` | `hytale-server.service` | systemd service name. |
-| `HYTALE_LOG_LINES` | `40` | Number of log lines shown by `/grate hytale logs`; capped at `100`. |
+| `HYTALE_LOG_LINES` | `40` | Number of log lines shown by `/grate hytale logs` (unstable); capped at `100`. |
 | `HYTALE_COMMAND_TIMEOUT_SECONDS` | `15` | Timeout for local service commands; minimum `1`. |
 
 Typical flow:
 
-1. Run `/grate hytale status`.
-2. If players report issues, run `/grate hytale logs`.
-3. Use `/grate hytale start` only when the service is stopped.
-4. Use `/grate hytale restart` when status/logs suggest the service is wedged.
-5. Use `/grate hytale stop` when intentionally taking the server offline.
-6. Re-check `/grate hytale status`.
+1. Run `/grate hytale status` (unstable).
+2. If players report issues, run `/grate hytale logs` (unstable).
+3. Use `/grate hytale start` (unstable) only when the service is stopped.
+4. Use `/grate hytale restart` (unstable) when status/logs suggest the service is wedged.
+5. Use `/grate hytale stop` (unstable) when intentionally taking the server offline.
+6. Re-check `/grate hytale status` (unstable).
 
-Setup details and sudo requirements live in [MAINTAINER_SETUP.md](MAINTAINER_SETUP.md).
+Server setup details, the bot `systemd` unit, Hytale build flags, and sudo requirements live in [MAINTAINER_SETUP.md](MAINTAINER_SETUP.md).

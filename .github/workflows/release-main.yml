@@ -60,8 +60,14 @@ jobs:
       - name: Check project
         run: cargo check --locked
 
+      - name: Check optional features
+        run: cargo check --locked --all-features
+
       - name: Run tests
         run: cargo test --locked
+
+      - name: Run tests with optional features
+        run: cargo test --locked --all-features
 
       - name: Build release binary
         run: cargo build --locked --release --bin grate-bot
@@ -74,7 +80,9 @@ jobs:
           mkdir -p "dist/${TAG}"
           cp target/release/grate-bot "dist/${TAG}/grate-bot"
           cp README.md "dist/${TAG}/README.md"
+          cp MAINTAINER_SETUP.md "dist/${TAG}/MAINTAINER_SETUP.md"
           cp .env.example "dist/${TAG}/.env.example"
+          cp -R deploy "dist/${TAG}/deploy"
           tar -C dist -czf "dist/${ARTIFACT}" "${TAG}"
 
       - name: Upload test-publish artifact
