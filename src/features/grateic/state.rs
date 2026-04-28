@@ -21,6 +21,7 @@ pub struct GameKey {
 pub struct CanvasConfig {
     pub preset: CanvasPreset,
     pub background_hex: String,
+    pub require_canvas_size: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +40,46 @@ pub enum SubmissionKind {
         attachment_url: String,
         filename: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GameMode {
+    Classic,
+    Short {
+        prompts: Vec<ShortPrompt>,
+        drawings: Vec<ShortDrawing>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShortPrompt {
+    pub author_id: u64,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShortDrawing {
+    pub author_id: u64,
+    pub prompt_author_id: u64,
+    pub prompt: String,
+    pub attachment_url: String,
+    pub filename: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShortDrawingAssignment {
+    pub player_id: u64,
+    pub prompt_author_id: u64,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShortShowcase {
+    pub prompt_author_id: u64,
+    pub prompt: String,
+    pub drawing_author_id: u64,
+    pub attachment_url: String,
+    pub filename: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +118,7 @@ pub struct Game {
     pub players: Vec<u64>,
     pub current_round: usize,
     pub chains: Vec<Chain>,
+    pub mode: GameMode,
     unready_players: HashSet<u64>,
     submitted_this_round: HashSet<u64>,
 }
@@ -129,10 +171,38 @@ pub enum Advance {
     Finished {
         chains: Vec<Chain>,
     },
+    ShortDrawingRound {
+        assignments: Vec<ShortDrawingAssignment>,
+    },
+    ShortFinished {
+        showcases: Vec<ShortShowcase>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartRound {
+    Classic(Vec<RoundAssignment>),
+    ShortPrompt,
 }
 
 impl Game {
     pub fn new(key: GameKey, host_id: u64, canvas: CanvasConfig) -> Self {
+        Self::new_with_mode(key, host_id, canvas, GameMode::Classic)
+    }
+
+    pub fn new_short(key: GameKey, host_id: u64, canvas: CanvasConfig) -> Self {
+        Self::new_with_mode(
+            key,
+            host_id,
+            canvas,
+            GameMode::Short {
+                prompts: Vec::new(),
+                drawings: Vec::new(),
+            },
+        )
+    }
+
+    fn new_with_mode(key: GameKey, host_id: u64, canvas: CanvasConfig, mode: GameMode) -> Self {
         Self {
             key,
             host_id,
@@ -141,6 +211,7 @@ impl Game {
             players: vec![host_id],
             current_round: 0,
             chains: Vec::new(),
+            mode,
             unready_players: HashSet::new(),
             submitted_this_round: HashSet::new(),
         }
@@ -177,7 +248,7 @@ impl Game {
         self.unready_players.insert(player_id);
     }
 
-    pub fn start(&mut self, requester_id: u64) -> Result<Vec<RoundAssignment>, GameError> {
+    pub fn start(&mut self, requester_id: u64) -> Result<StartRound, GameError> {
         if requester_id != self.host_id {
             return Err(GameError::NotHost);
         }
@@ -197,16 +268,27 @@ impl Game {
         self.phase = GamePhase::InProgress;
         self.current_round = 0;
         self.submitted_this_round.clear();
-        self.chains = self
-            .players
-            .iter()
-            .map(|player_id| Chain {
-                original_player_id: *player_id,
-                entries: Vec::new(),
-            })
-            .collect();
 
-        Ok(self.assignments_for_current_round())
+        match &mut self.mode {
+            GameMode::Classic => {
+                self.chains = self
+                    .players
+                    .iter()
+                    .map(|player_id| Chain {
+                        original_player_id: *player_id,
+                        entries: Vec::new(),
+                    })
+                    .collect();
+
+                Ok(StartRound::Classic(self.assignments_for_current_round()))
+            }
+            GameMode::Short { prompts, drawings } => {
+                prompts.clear();
+                drawings.clear();
+                self.chains.clear();
+                Ok(StartRound::ShortPrompt)
+            }
+        }
     }
 
     pub fn reset_to_lobby_after_failed_start(&mut self, unready_player_id: u64) {
@@ -214,6 +296,10 @@ impl Game {
         self.current_round = 0;
         self.chains.clear();
         self.submitted_this_round.clear();
+        if let GameMode::Short { prompts, drawings } = &mut self.mode {
+            prompts.clear();
+            drawings.clear();
+        }
         self.mark_not_ready(unready_player_id);
     }
 
@@ -227,6 +313,10 @@ impl Game {
     }
 
     pub fn submit_text(&mut self, player_id: u64, text: String) -> Result<Advance, GameError> {
+        if matches!(self.mode, GameMode::Short { .. }) {
+            return self.submit_short_prompt(player_id, text);
+        }
+
         if !matches!(self.round_kind(), RoundKind::Prompt | RoundKind::Naming) {
             return Err(GameError::ExpectedDrawing);
         }
@@ -246,6 +336,10 @@ impl Game {
         attachment_url: String,
         filename: String,
     ) -> Result<Advance, GameError> {
+        if matches!(self.mode, GameMode::Short { .. }) {
+            return self.submit_short_drawing(player_id, attachment_url, filename);
+        }
+
         if self.round_kind() != RoundKind::Drawing {
             return Err(GameError::ExpectedText);
         }
@@ -264,6 +358,19 @@ impl Game {
     }
 
     pub fn pending_next_round(&self) -> Option<Advance> {
+        if matches!(self.mode, GameMode::Short { .. }) {
+            if self.phase == GamePhase::InProgress
+                && self.current_round == 0
+                && self.submitted_this_round.len() == self.players.len()
+            {
+                return Some(Advance::ShortDrawingRound {
+                    assignments: self.short_drawing_assignments(),
+                });
+            }
+
+            return None;
+        }
+
         if self.phase != GamePhase::InProgress
             || self.submitted_this_round.len() != self.players.len()
             || self.current_round + 1 >= self.total_rounds()
@@ -279,6 +386,24 @@ impl Game {
     }
 
     pub fn commit_next_round(&mut self, next_round: usize) -> Result<(), GameError> {
+        if matches!(self.mode, GameMode::Short { .. }) {
+            if self.phase != GamePhase::InProgress {
+                return Err(GameError::NotInProgress);
+            }
+
+            if self.current_round != 0 || next_round != 1 {
+                return Err(GameError::StaleRoundTransition);
+            }
+
+            if self.submitted_this_round.len() != self.players.len() {
+                return Err(GameError::RoundNotComplete);
+            }
+
+            self.current_round = 1;
+            self.submitted_this_round.clear();
+            return Ok(());
+        }
+
         if self.phase != GamePhase::InProgress {
             return Err(GameError::NotInProgress);
         }
@@ -313,6 +438,14 @@ impl Game {
     }
 
     pub fn round_kind(&self) -> RoundKind {
+        if matches!(self.mode, GameMode::Short { .. }) {
+            return if self.current_round == 0 {
+                RoundKind::Prompt
+            } else {
+                RoundKind::Drawing
+            };
+        }
+
         self.round_kind_for(self.current_round)
     }
 
@@ -342,7 +475,19 @@ impl Game {
     }
 
     pub fn total_rounds(&self) -> usize {
+        if matches!(self.mode, GameMode::Short { .. }) {
+            return 2;
+        }
+
         self.players.len() * 2 + 1
+    }
+
+    pub fn is_short(&self) -> bool {
+        matches!(self.mode, GameMode::Short { .. })
+    }
+
+    pub fn mode_label(&self) -> &'static str {
+        if self.is_short() { "short" } else { "classic" }
     }
 
     fn submit(&mut self, player_id: u64, kind: SubmissionKind) -> Result<Advance, GameError> {
@@ -391,6 +536,142 @@ impl Game {
     fn assigned_chain_index(&self, player_index: usize) -> usize {
         self.chain_index_for(player_index, self.current_round)
     }
+
+    fn submit_short_prompt(&mut self, player_id: u64, text: String) -> Result<Advance, GameError> {
+        if self.phase != GamePhase::InProgress {
+            return Err(GameError::NotInProgress);
+        }
+
+        if self.current_round != 0 {
+            return Err(GameError::ExpectedDrawing);
+        }
+
+        if !self.players.contains(&player_id) {
+            return Err(GameError::NotAPlayer);
+        }
+
+        if self.submitted_this_round.contains(&player_id) {
+            return Err(GameError::AlreadySubmitted);
+        }
+
+        let GameMode::Short { prompts, .. } = &mut self.mode else {
+            unreachable!("short prompt submissions only run in short mode");
+        };
+
+        prompts.push(ShortPrompt {
+            author_id: player_id,
+            text: text.trim().to_owned(),
+        });
+        self.submitted_this_round.insert(player_id);
+
+        if self.submitted_this_round.len() < self.players.len() {
+            return Ok(Advance::Waiting);
+        }
+
+        Ok(Advance::ShortDrawingRound {
+            assignments: self.short_drawing_assignments(),
+        })
+    }
+
+    fn submit_short_drawing(
+        &mut self,
+        player_id: u64,
+        attachment_url: String,
+        filename: String,
+    ) -> Result<Advance, GameError> {
+        if self.phase != GamePhase::InProgress {
+            return Err(GameError::NotInProgress);
+        }
+
+        if self.current_round != 1 {
+            return Err(GameError::ExpectedText);
+        }
+
+        if !self.players.contains(&player_id) {
+            return Err(GameError::NotAPlayer);
+        }
+
+        if self.submitted_this_round.contains(&player_id) {
+            return Err(GameError::AlreadySubmitted);
+        }
+
+        let Some(assignment) = self
+            .short_drawing_assignments()
+            .into_iter()
+            .find(|assignment| assignment.player_id == player_id)
+        else {
+            return Err(GameError::NotAPlayer);
+        };
+
+        let GameMode::Short { drawings, .. } = &mut self.mode else {
+            unreachable!("short drawing submissions only run in short mode");
+        };
+
+        drawings.push(ShortDrawing {
+            author_id: player_id,
+            prompt_author_id: assignment.prompt_author_id,
+            prompt: assignment.prompt,
+            attachment_url,
+            filename,
+        });
+        self.submitted_this_round.insert(player_id);
+
+        if self.submitted_this_round.len() < self.players.len() {
+            return Ok(Advance::Waiting);
+        }
+
+        self.phase = GamePhase::Finished;
+        Ok(Advance::ShortFinished {
+            showcases: self.short_showcases(),
+        })
+    }
+
+    fn short_drawing_assignments(&self) -> Vec<ShortDrawingAssignment> {
+        let GameMode::Short { prompts, .. } = &self.mode else {
+            return Vec::new();
+        };
+
+        self.players
+            .iter()
+            .enumerate()
+            .filter_map(|(player_index, player_id)| {
+                let prompt_author_id =
+                    self.players[(player_index + self.players.len() - 1) % self.players.len()];
+                let prompt = prompts
+                    .iter()
+                    .find(|prompt| prompt.author_id == prompt_author_id)?;
+
+                Some(ShortDrawingAssignment {
+                    player_id: *player_id,
+                    prompt_author_id,
+                    prompt: prompt.text.clone(),
+                })
+            })
+            .collect()
+    }
+
+    fn short_showcases(&self) -> Vec<ShortShowcase> {
+        let GameMode::Short { drawings, .. } = &self.mode else {
+            return Vec::new();
+        };
+
+        self.players
+            .iter()
+            .filter_map(|prompt_author_id| {
+                let drawing = drawings
+                    .iter()
+                    .find(|drawing| drawing.prompt_author_id == *prompt_author_id)?;
+
+                Some(ShortShowcase {
+                    prompt_author_id: *prompt_author_id,
+                    prompt: drawing.prompt.clone(),
+                    drawing_author_id: drawing.author_id,
+                    attachment_url: drawing.attachment_url.clone(),
+                    filename: drawing.filename.clone(),
+                })
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -407,6 +688,28 @@ mod tests {
             CanvasConfig {
                 preset: CanvasPreset::Square,
                 background_hex: "#ffffff".to_owned(),
+                require_canvas_size: true,
+            },
+        );
+
+        for player_id in 2..=count {
+            game.join(player_id).unwrap();
+        }
+
+        game
+    }
+
+    fn short_game_with_players(count: u64) -> Game {
+        let mut game = Game::new_short(
+            GameKey {
+                guild_id: 1,
+                channel_id: 10,
+            },
+            1,
+            CanvasConfig {
+                preset: CanvasPreset::Square,
+                background_hex: "#ffffff".to_owned(),
+                require_canvas_size: true,
             },
         );
 
@@ -688,5 +991,89 @@ mod tests {
         game.mark_ready(2).unwrap();
         assert!(game.unready_players().is_empty());
         assert!(game.start(1).is_ok());
+    }
+
+    #[test]
+    fn short_game_collects_prompts_then_assigns_each_to_another_player() {
+        let mut game = short_game_with_players(3);
+
+        assert_eq!(game.start(1).unwrap(), StartRound::ShortPrompt);
+        assert_eq!(game.total_rounds(), 2);
+        assert_eq!(game.round_kind(), RoundKind::Prompt);
+
+        assert_eq!(
+            game.submit_text(1, "sun whale".to_owned()).unwrap(),
+            Advance::Waiting
+        );
+        assert_eq!(
+            game.submit_text(2, "moon castle".to_owned()).unwrap(),
+            Advance::Waiting
+        );
+
+        let advance = game.submit_text(3, "tiny train".to_owned()).unwrap();
+        let Advance::ShortDrawingRound { assignments } = advance else {
+            panic!("expected short drawing assignments");
+        };
+
+        assert_eq!(assignments.len(), 3);
+        for assignment in &assignments {
+            assert_ne!(assignment.player_id, assignment.prompt_author_id);
+        }
+
+        assert_eq!(assignments[0].player_id, 1);
+        assert_eq!(assignments[0].prompt_author_id, 3);
+        assert_eq!(assignments[0].prompt, "tiny train");
+
+        game.commit_next_round(1).unwrap();
+        assert_eq!(game.round_kind(), RoundKind::Drawing);
+        assert_eq!(game.submitted_count(), 0);
+    }
+
+    #[test]
+    fn short_game_finishes_with_showcases_after_one_drawing_round() {
+        let mut game = short_game_with_players(2);
+        game.start(1).unwrap();
+
+        game.submit_text(1, "red door".to_owned()).unwrap();
+        let advance = game.submit_text(2, "blue key".to_owned()).unwrap();
+        let Advance::ShortDrawingRound { assignments } = advance else {
+            panic!("expected short drawing assignments");
+        };
+        game.commit_next_round(1).unwrap();
+
+        assert_eq!(game.round_kind(), RoundKind::Drawing);
+        assert_eq!(
+            game.submit_drawing(
+                assignments[0].player_id,
+                "https://cdn.example/one.png".to_owned(),
+                "one.png".to_owned(),
+            )
+            .unwrap(),
+            Advance::Waiting
+        );
+
+        let advance = game
+            .submit_drawing(
+                assignments[1].player_id,
+                "https://cdn.example/two.png".to_owned(),
+                "two.png".to_owned(),
+            )
+            .unwrap();
+        let Advance::ShortFinished { showcases } = advance else {
+            panic!("expected short showcases");
+        };
+
+        assert_eq!(game.phase, GamePhase::Finished);
+        assert_eq!(showcases.len(), 2);
+        assert!(showcases.iter().any(|showcase| {
+            showcase.prompt_author_id == 1
+                && showcase.prompt == "red door"
+                && showcase.drawing_author_id == 2
+        }));
+        assert!(showcases.iter().any(|showcase| {
+            showcase.prompt_author_id == 2
+                && showcase.prompt == "blue key"
+                && showcase.drawing_author_id == 1
+        }));
     }
 }

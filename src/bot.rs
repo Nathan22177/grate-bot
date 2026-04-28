@@ -1,5 +1,5 @@
 use crate::features::{
-    grateic::{self as grateic_feature, grateic},
+    grateic::{self as grateic_feature, create, grateic},
     hytale::hytale,
 };
 use anyhow::Context as AnyhowContext;
@@ -63,7 +63,10 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[poise::command(slash_command, subcommands("help", "grateic", "verify", "hytale"))]
+#[poise::command(
+    slash_command,
+    subcommands("help", "create", "grateic", "verify", "hytale")
+)]
 async fn grate(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
@@ -109,14 +112,14 @@ fn help_message() -> &'static str {
     "Grate Boss help\n\
 \n\
 Broadly, I can help with:\n\
-- Grateic: host a Discord drawing-and-prompt game. Create a lobby, let players join, start rounds, collect text and drawing submissions in DMs, track status, cancel a lobby, and reveal the finished chains.\n\
+	- Grateic: host a Discord drawing-and-prompt game. Create a short or full lobby, let players join, start rounds, collect text and drawing submissions in DMs, track status, cancel a lobby, and reveal the finished game.\n\
 - Hytale management: for trusted server helpers, check the Hytale server status, read recent logs, and start, stop, or restart the service.\n\
 - Build verification: show the running bot version, source ref, commit, build input state, and executable SHA-256 so you can compare the live bot against a release.\n\
 \n\
 Useful commands:\n\
-- `/grate grateic create` starts a Grateic lobby with canvas size and background options.\n\
-- `/grate grateic join`, `/grate grateic ready`, `/grate grateic start`, `/grate grateic status`, and `/grate grateic cancel` manage a Grateic game.\n\
-- `/grate hytale status`, `/grate hytale logs`, `/grate hytale start`, `/grate hytale stop`, and `/grate hytale restart` manage the Hytale server if you have permission.\n\
+	- `/grate create` starts a Grateic lobby with mode, canvas size, background, and canvas-size-rule options.\n\
+	- `/grate grateic help`, `/grate grateic join`, `/grate grateic ready`, `/grate grateic start`, `/grate grateic status`, and `/grate grateic cancel` explain or manage a Grateic game.\n\
+	- `/grate hytale help`, `/grate hytale status`, `/grate hytale logs`, `/grate hytale start`, `/grate hytale stop`, and `/grate hytale restart` explain or manage the Hytale server if you have permission.\n\
 - `/grate verify` reports what build is currently running.\n\
 \n\
 Notes: Grateic game state is kept in memory, so active games reset if I restart. Hytale controls only work for users with the configured manager role."

@@ -1,46 +1,48 @@
 # grate-bot
 
-Bot for various Grate shenanigans.
+Discord bot for Grate server utilities:
 
-## Features
+- Grateic drawing-and-prompt games
+- Hytale server management for trusted helpers
+- Build verification for the running bot binary
 
-- Grateic: a small Grateic Phone-style drawing-and-prompt game.
-- Help: a broad overview of what the bot can do.
-- Build verification: a command for checking the running bot binary.
-- Hytale management: simple Discord commands for trusted users to manage a co-hosted Hytale server.
+## Commands
 
-## Help
+### Grateic
 
-Commands:
+| Command | Purpose |
+| --- | --- |
+| `/grate create` | Create a Grateic lobby. |
+| `/grate grateic help` | Explain Grateic commands, settings, modes, and examples. |
+| `/grate grateic join` | Join the active Grateic lobby in this server. |
+| `/grate grateic ready` | Retry the DM readiness check after fixing DMs. |
+| `/grate grateic start` | Start the active lobby. Host only. |
+| `/grate grateic status` | Show players, mode, round, readiness, canvas, and waiting count. |
+| `/grate grateic cancel` | Cancel the active lobby. Host only. |
 
-- `/grate help`
+Create a lobby with:
 
-`/grate help` gives users a broad overview of Grateic games, Hytale server controls, and build verification, plus the main commands for each area.
+```text
+/grate create mode:<short|full> preset:<square|portrait|landscape> background:<color-preset> custom_background:<#RRGGBB?> require_canvas_size:<true|false?>
+```
 
-## Grateic
+`/grate create` settings:
 
-Grateic runs a drawing-and-prompt game inside Discord. Players join from the server channel, then submit prompts and drawings in DMs.
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `mode` | Required | `short` for one prompt and one drawing, or `full` for the telephone-style chain game. |
+| `preset` | Required | Canvas size: `square`, `portrait`, or `landscape`. |
+| `background` | Required | Canvas background color preset. |
+| `custom_background` | None | Required only when `background` is `custom hex`; must use `#RRGGBB`. |
+| `require_canvas_size` | `true` | When enabled, drawing uploads must exactly match the selected canvas size. |
 
-### Grateic Commands
+Canvas presets:
 
-- `/grate grateic create preset:<square|portrait|landscape> background:<color-preset> custom_background:<#RRGGBB?>`
-- `/grate grateic join`
-- `/grate grateic ready`
-- `/grate grateic start`
-- `/grate grateic status`
-- `/grate grateic cancel`
-
-Arguments for `/grate grateic create`:
-
-- `preset`: canvas size preset.
-- `background`: background color preset.
-- `custom_background`: required only when `background` is `custom hex`; must use `#RRGGBB`.
-
-Canvas size presets:
-
-- `square`: `1024x1024`
-- `portrait`: `1080x1920`
-- `landscape`: `1920x1080`
+| Preset | Size |
+| --- | --- |
+| `square` | `1024x1024` |
+| `portrait` | `1080x1920` |
+| `landscape` | `1920x1080` |
 
 Background choices:
 
@@ -52,65 +54,109 @@ Background choices:
 - `pale pink (#fce7f3)`
 - `custom hex`
 
+### Hytale
+
+| Command | Purpose |
+| --- | --- |
+| `/grate hytale help` | Explain Hytale commands, settings, permissions, operations flow, and troubleshooting. |
+| `/grate hytale status` | Check whether the Hytale service is running and enabled on boot. |
+| `/grate hytale logs` | Show recent service logs. |
+| `/grate hytale start` | Start the Hytale service. |
+| `/grate hytale stop` | Stop the Hytale service. |
+| `/grate hytale restart` | Restart the Hytale service. |
+
+Hytale management commands require the configured Hytale manager role. The help command is available without that role so people can discover the setup and permission requirements.
+
 ### Build Verification
 
-Build verification lets users inspect the running bot build and compare it against a published release artifact.
+| Command | Purpose |
+| --- | --- |
+| `/grate verify` | Report the running bot version, source ref, build commit, build input state, and executable SHA-256 checksum. |
 
-Commands:
+Use `/grate verify` to compare the running binary against a published release artifact.
 
-- `/grate verify`
+## Grateic Rules
 
-`/grate verify` reports the running bot's Cargo package version, source ref, build commit, build input state, and SHA-256 checksum of the executable. Users can compare the checksum against the binary you publish for a release.
+Grateic is played in Discord DMs after players join from a server channel. Games are stored in memory, reset when the bot restarts, and are limited to one active Grateic game per server. A Discord user can only be enrolled in one active Grateic game across the bot.
 
-### Server Buttons
+Players are treated as ready when they join. If the bot cannot DM someone when the host starts the game, it rolls the game back to the lobby and marks that player unready. After they enable DMs from the server, they can run `/grate grateic ready`; then the host can run `/grate grateic start` again.
 
-Lobby and status messages in the server include `Join`, `Status`, and `Start` buttons, so players do not need to type every command. The game reveal is posted in the channel where `/grate grateic create` was run.
+Lobby and status messages include `Join`, `Status`, and `Start` buttons. DM assignment messages include a `Status` button for checking the game without returning to the server channel. Reveals are posted in the channel where `/grate create` was run.
 
-DM assignment messages include a `Status` button for checking the game without returning to the server channel.
+### Short Mode
 
-### Game Rules
+Short mode is the fast showcase flow:
 
-Games are stored in memory and reset when the bot restarts. Only one Grateic game can be active per server, and a Discord user can only be enrolled in one active Grateic game across the bot.
+1. Every player submits one prompt.
+2. Each player receives one prompt from another player.
+3. Each player uploads one drawing.
+4. The bot reveals each prompt with its drawing.
 
-Player submissions happen in DMs. Players are treated as ready when they join. If the bot cannot DM someone on start, it rolls the game back to the lobby and marks that player unready. After they enable DMs from the server, they can run `/grate grateic ready`; then the host can try `/grate grateic start` again.
+Example with 3 players:
 
-On start, the bot generates a blank PNG canvas from the chosen size preset and background color, sends it to every player, and asks every player for an initial prompt.
+1. A, B, and C submit prompts.
+2. A draws C's prompt, B draws A's prompt, and C draws B's prompt.
+3. The bot posts the three showcases.
 
-Each chain starts with one player's prompt, then rotates through the players as alternating drawing and prompt rounds:
+### Full Mode
 
-1. A player who receives text draws it and uploads an image.
-2. A player who receives an image describes it for the next player to draw.
-3. The chain keeps rotating until the original prompt author receives the final drawing.
-4. The original prompt author gives that final drawing a name/title.
+Full mode is the telephone-style chain flow:
 
-For `N` players, the game runs `2N + 1` rounds. After every chain is titled, the bot reveals how each starting prompt transformed.
+1. Every player submits an initial prompt.
+2. Players draw prompts.
+3. Players describe drawings.
+4. Drawing and prompt rounds alternate as chains rotate.
+5. The original prompt author receives the final drawing and gives it a name.
+6. The bot reveals every chain.
 
-If the bot cannot DM a next-round assignment, the game does not advance. Players can fix DMs and have any player DM the bot again to retry assignment delivery.
+For `N` players, full mode runs `2N + 1` rounds.
 
-### Grateic Validation
+### Canvas Size Rule
 
-The bot rejects duplicate submissions, submissions from non-players, text when an image is required, image-less messages when a drawing is required, invalid custom hex colors, and submissions after the game has ended.
+By default, `require_canvas_size` is enabled. During drawing rounds, uploaded images must exactly match the selected canvas preset:
 
-## Hytale Management
+- `square`: `1024x1024`
+- `portrait`: `1080x1920`
+- `landscape`: `1920x1080`
 
-The Hytale commands are for trusted server helpers to check on the Hytale server or nudge it when it needs basic care.
+If an upload is the wrong size, the bot rejects it and tells the player the expected and actual dimensions. If Discord does not report image dimensions, the bot asks for a normal image upload whose dimensions Discord can detect.
 
-### Hytale Commands
+Set `require_canvas_size:false` in `/grate create` to allow any image size for that lobby.
 
-- `/grate hytale status`: check whether the Hytale server is running.
-- `/grate hytale logs`: show recent server messages for quick troubleshooting.
-- `/grate hytale start`: start the Hytale server.
-- `/grate hytale stop`: stop the Hytale server.
-- `/grate hytale restart`: restart the Hytale server.
+### Validation
 
-You need the Hytale manager role to use these commands.
+The bot rejects:
 
-## Maintainers
+- Duplicate submissions
+- Submissions from non-players
+- Text when an image is required
+- Image-less messages when a drawing is required
+- Wrong-size drawings when `require_canvas_size` is enabled
+- Invalid custom hex colors
+- Submissions after the game has ended
 
-Setup and deployment notes live in [MAINTAINER_SETUP.md](MAINTAINER_SETUP.md).
+If the bot cannot DM next-round assignments, the game does not advance. Players can fix DMs and have any player DM the bot again to retry assignment delivery.
 
-## Testing
+## Hytale Operations
 
-```sh
-cargo test
-```
+Hytale commands are for trusted helpers to check or nudge a co-hosted Hytale service.
+
+Default settings:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `HYTALE_MANAGER_ROLE_ID` | Required | Discord role allowed to use Hytale management commands. |
+| `HYTALE_SERVICE_NAME` | `hytale-server.service` | systemd service name. |
+| `HYTALE_LOG_LINES` | `40` | Number of log lines shown by `/grate hytale logs`; capped at `100`. |
+| `HYTALE_COMMAND_TIMEOUT_SECONDS` | `15` | Timeout for local service commands; minimum `1`. |
+
+Typical flow:
+
+1. Run `/grate hytale status`.
+2. If players report issues, run `/grate hytale logs`.
+3. Use `/grate hytale start` only when the service is stopped.
+4. Use `/grate hytale restart` when status/logs suggest the service is wedged.
+5. Use `/grate hytale stop` when intentionally taking the server offline.
+6. Re-check `/grate hytale status`.
+
+Setup details and sudo requirements live in [MAINTAINER_SETUP.md](MAINTAINER_SETUP.md).

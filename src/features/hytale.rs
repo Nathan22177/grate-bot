@@ -13,6 +13,22 @@ const MAX_LOG_LINES: u16 = 100;
 const DEFAULT_TIMEOUT_SECONDS: u64 = 15;
 const MAX_RESPONSE_CHARS: usize = 1_750;
 
+#[derive(Debug, Clone, Copy, poise::ChoiceParameter)]
+pub enum HytaleHelpTopicChoice {
+    #[name = "overview"]
+    Overview,
+    #[name = "commands"]
+    Commands,
+    #[name = "settings"]
+    Settings,
+    #[name = "permissions"]
+    Permissions,
+    #[name = "operations flow"]
+    OperationsFlow,
+    #[name = "troubleshooting"]
+    Troubleshooting,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct HytaleConfig {
     manager_role_id: RoleId,
@@ -85,9 +101,22 @@ fn read_u64(key: &str, default: u64) -> u64 {
 
 #[poise::command(
     slash_command,
-    subcommands("status", "logs", "start", "stop", "restart")
+    subcommands("help", "status", "logs", "start", "stop", "restart")
 )]
 pub async fn hytale(_ctx: Context<'_>) -> Result<(), Error> {
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+async fn help(
+    ctx: Context<'_>,
+    #[description = "What to explain; defaults to overview"] topic: Option<HytaleHelpTopicChoice>,
+) -> Result<(), Error> {
+    ctx.say(hytale_help_text(
+        topic.unwrap_or(HytaleHelpTopicChoice::Overview),
+    ))
+    .await?;
+
     Ok(())
 }
 
@@ -418,6 +447,29 @@ fn truncate_text(value: &str, max_chars: usize) -> String {
 
 fn truncate_inline(value: &str, max_chars: usize) -> String {
     truncate_text(value, max_chars).replace('\n', " ")
+}
+
+fn hytale_help_text(topic: HytaleHelpTopicChoice) -> &'static str {
+    match topic {
+        HytaleHelpTopicChoice::Overview => {
+            "Hytale help: these commands let trusted server helpers check or nudge the hosted Hytale server.\n\nUse the `topic` option on `/grate hytale help` for focused help: `commands`, `settings`, `permissions`, `operations flow`, or `troubleshooting`.\n\nDefault behavior: the bot manages `hytale-server.service`, shows 40 log lines, and waits up to 15 seconds for local commands unless the bot owner configured different environment variables. All management commands require the Hytale manager role."
+        }
+        HytaleHelpTopicChoice::Commands => {
+            "Hytale commands:\n`/grate hytale help`: explain commands, settings, permissions, and troubleshooting.\n`/grate hytale status`: checks whether the service is running, whether it starts on boot, and includes trimmed `systemctl status` details.\n`/grate hytale logs`: shows recent service logs from `journalctl`.\n`/grate hytale start`: asks systemd to start the server.\n`/grate hytale stop`: asks systemd to stop the server.\n`/grate hytale restart`: asks systemd to restart the server.\n\nStatus, logs, start, stop, and restart are ephemeral and require the configured manager role."
+        }
+        HytaleHelpTopicChoice::Settings => {
+            "Hytale settings for the bot owner:\n`HYTALE_MANAGER_ROLE_ID`: required Discord role ID allowed to use Hytale controls.\n`HYTALE_SERVICE_NAME`: optional systemd service name. Defaults to `hytale-server.service`.\n`HYTALE_LOG_LINES`: optional number of log lines for `/grate hytale logs`. Defaults to 40 and is capped at 100.\n`HYTALE_COMMAND_TIMEOUT_SECONDS`: optional timeout for local commands. Defaults to 15 seconds, with a minimum of 1 second.\n\nIf the required role ID is missing or invalid, management commands explain the setup problem instead of running."
+        }
+        HytaleHelpTopicChoice::Permissions => {
+            "Hytale permissions:\nOnly members with the configured Hytale manager role can run `status`, `logs`, `start`, `stop`, or `restart`.\n\nThe bot also needs host permissions: it must be able to run read-only `systemctl` status checks, read service logs with `journalctl`, and run passwordless sudo only for `systemctl start`, `stop`, and `restart` on the configured Hytale service.\n\nThe help command is available without the manager role so people can discover how the controls work."
+        }
+        HytaleHelpTopicChoice::OperationsFlow => {
+            "Typical Hytale operations flow:\n1. Run `/grate hytale status` to see whether the service is active or failed.\n2. If players report issues, run `/grate hytale logs` and scan recent output.\n3. Use `/grate hytale start` only when the server is stopped.\n4. Use `/grate hytale restart` when the server is wedged and logs/status suggest a restart is appropriate.\n5. Use `/grate hytale stop` when intentionally taking the server offline.\n6. Re-check `/grate hytale status` after start, stop, or restart."
+        }
+        HytaleHelpTopicChoice::Troubleshooting => {
+            "Hytale troubleshooting:\nIf commands say controls are not set up, the bot owner needs to set `HYTALE_MANAGER_ROLE_ID`.\nIf you lack permission, ask for the configured Hytale manager role.\nIf start/stop/restart fails, the host may be missing passwordless sudo for that exact service action.\nIf logs fail, the bot host user may need journal access, such as membership in `systemd-journal` on Ubuntu.\nIf output is trimmed, use host access for deeper investigation; Discord replies intentionally cap long command output."
+        }
+    }
 }
 
 #[cfg(test)]
