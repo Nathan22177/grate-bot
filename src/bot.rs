@@ -63,8 +63,14 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[poise::command(slash_command, subcommands("grateic", "verify", "hytale"))]
+#[poise::command(slash_command, subcommands("help", "grateic", "verify", "hytale"))]
 async fn grate(_ctx: Context<'_>) -> Result<(), Error> {
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+async fn help(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.say(help_message()).await?;
     Ok(())
 }
 
@@ -97,4 +103,37 @@ fn sha256_file(path: &Path) -> anyhow::Result<String> {
     }
 
     Ok(hex)
+}
+
+fn help_message() -> &'static str {
+    "Grate Boss help\n\
+\n\
+Broadly, I can help with:\n\
+- Grateic: host a Discord drawing-and-prompt game. Create a lobby, let players join, start rounds, collect text and drawing submissions in DMs, track status, cancel a lobby, and reveal the finished chains.\n\
+- Hytale management: for trusted server helpers, check the Hytale server status, read recent logs, and start, stop, or restart the service.\n\
+- Build verification: show the running bot version, source ref, commit, build input state, and executable SHA-256 so you can compare the live bot against a release.\n\
+\n\
+Useful commands:\n\
+- `/grate grateic create` starts a Grateic lobby with canvas size and background options.\n\
+- `/grate grateic join`, `/grate grateic ready`, `/grate grateic start`, `/grate grateic status`, and `/grate grateic cancel` manage a Grateic game.\n\
+- `/grate hytale status`, `/grate hytale logs`, `/grate hytale start`, `/grate hytale stop`, and `/grate hytale restart` manage the Hytale server if you have permission.\n\
+- `/grate verify` reports what build is currently running.\n\
+\n\
+Notes: Grateic game state is kept in memory, so active games reset if I restart. Hytale controls only work for users with the configured manager role."
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn help_message_mentions_major_features_and_commands() {
+        let message = help_message();
+
+        assert!(message.contains("Grateic"));
+        assert!(message.contains("Hytale management"));
+        assert!(message.contains("Build verification"));
+        assert!(message.contains("/grate verify"));
+        assert!(message.contains("/grate hytale status"));
+    }
 }

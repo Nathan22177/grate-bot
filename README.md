@@ -5,8 +5,17 @@ Bot for various Grate shenanigans.
 ## Features
 
 - Grateic: a small Grateic Phone-style drawing-and-prompt game.
+- Help: a broad overview of what the bot can do.
 - Build verification: a command for checking the running bot binary.
 - Hytale management: simple Discord commands for trusted users to manage a co-hosted Hytale server.
+
+## Help
+
+Commands:
+
+- `/grate help`
+
+`/grate help` gives users a broad overview of Grateic games, Hytale server controls, and build verification, plus the main commands for each area.
 
 ## Grateic
 
