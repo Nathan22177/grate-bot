@@ -1,0 +1,68 @@
+name: Test publish
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-publish:
+    name: test-publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Read package version
+        id: package
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          sha="$(git rev-parse --short HEAD)"
+          echo "tag=v${version}-${sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Check project
+        run: cargo check --locked
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Build release binary
+        run: cargo build --locked --release --bin grate-bot
+
+      - name: Package test-publish artifact
+        env:
+          TAG: ${{ steps.package.outputs.tag }}
+        run: |
+          mkdir -p "dist/${TAG}"
+          cp target/release/grate-bot "dist/${TAG}/grate-bot"
+          cp README.md "dist/${TAG}/README.md"
+          cp .env.example "dist/${TAG}/.env.example"
+          tar -C dist -czf "dist/grate-bot-${TAG}-x86_64-unknown-linux-gnu.tar.gz" "${TAG}"
+
+      - name: Upload test-publish artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: grate-bot-${{ steps.package.outputs.tag }}-x86_64-unknown-linux-gnu.tar.gz
+          path: dist/grate-bot-${{ steps.package.outputs.tag }}-x86_64-unknown-linux-gnu.tar.gz
+          if-no-files-found: error
