@@ -1253,6 +1253,31 @@ fn grateic_help_text(topic: HelpTopicChoice) -> &'static str {
     }
 }
 
+async fn active_game_key_from_context(ctx: Context<'_>) -> Result<GameKey, Error> {
+    let guild_id = guild_id_from_context(ctx)?;
+    active_game_key_for_guild(ctx.data(), guild_id).await
+}
+
+async fn active_game_key_for_guild(data: &Data, guild_id: u64) -> Result<GameKey, Error> {
+    let games = data.grateic.games.read().await;
+    games
+        .keys()
+        .find(|key| key.guild_id == guild_id)
+        .copied()
+        .ok_or_else(|| GameError::GameNotFound.into())
+}
+
+fn guild_id_from_context(ctx: Context<'_>) -> Result<u64, Error> {
+    Ok(ctx.guild_id().ok_or(GameError::MissingGuild)?.get())
+}
+
+fn game_key_from_context(ctx: Context<'_>) -> Result<GameKey, Error> {
+    Ok(GameKey {
+        guild_id: guild_id_from_context(ctx)?,
+        channel_id: ctx.channel_id().get(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1297,29 +1322,4 @@ mod tests {
         );
         assert_eq!(validate_canvas_size(&canvas(false), None), Ok(()));
     }
-}
-
-async fn active_game_key_from_context(ctx: Context<'_>) -> Result<GameKey, Error> {
-    let guild_id = guild_id_from_context(ctx)?;
-    active_game_key_for_guild(ctx.data(), guild_id).await
-}
-
-async fn active_game_key_for_guild(data: &Data, guild_id: u64) -> Result<GameKey, Error> {
-    let games = data.grateic.games.read().await;
-    games
-        .keys()
-        .find(|key| key.guild_id == guild_id)
-        .copied()
-        .ok_or_else(|| GameError::GameNotFound.into())
-}
-
-fn guild_id_from_context(ctx: Context<'_>) -> Result<u64, Error> {
-    Ok(ctx.guild_id().ok_or(GameError::MissingGuild)?.get())
-}
-
-fn game_key_from_context(ctx: Context<'_>) -> Result<GameKey, Error> {
-    Ok(GameKey {
-        guild_id: guild_id_from_context(ctx)?,
-        channel_id: ctx.channel_id().get(),
-    })
 }
