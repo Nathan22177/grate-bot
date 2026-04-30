@@ -161,7 +161,7 @@ pub async fn create(
         }
 
         let host_id = ctx.author().id.get();
-        if games.values().any(|game| game.players.contains(&host_id)) {
+        if games.values().any(|game| game.has_player(host_id)) {
             return Err(GameError::AlreadyInAnotherGame.into());
         }
 
@@ -240,7 +240,7 @@ async fn ready(ctx: Context<'_>) -> Result<(), Error> {
             return Err(GameError::NotInLobby.into());
         }
 
-        if !game.players.contains(&player_id) {
+        if !game.has_player(player_id) {
             return Err(GameError::NotAPlayer.into());
         }
     }
@@ -280,7 +280,7 @@ async fn start(ctx: Context<'_>) -> Result<(), Error> {
     ctx.send(
         poise::CreateReply::default()
             .content(start_game(ctx.serenity_context(), ctx.data(), key, requester_id).await?)
-            .components(server_status_component(key)),
+            .components(status_button_components(key)),
     )
     .await?;
 
@@ -337,8 +337,7 @@ pub async fn handle_message(
         games
             .iter()
             .filter_map(|(key, game)| {
-                (game.phase == GamePhase::InProgress && game.players.contains(&player_id))
-                    .then_some(*key)
+                (game.phase == GamePhase::InProgress && game.has_player(player_id)).then_some(*key)
             })
             .collect::<Vec<_>>()
     };
@@ -359,65 +358,7 @@ pub async fn handle_message(
     let action = {
         let mut games = data.grateic.games.write().await;
         let game = games.get_mut(key).ok_or(GameError::GameNotFound)?;
-
-        if let Some(pending_advance) = game.pending_next_round() {
-            Ok((pending_advance, None))
-        } else {
-            match game.round_kind() {
-                RoundKind::Prompt | RoundKind::Naming => {
-                    let text = message.content.trim();
-                    if text.is_empty() {
-                        return message
-                            .channel_id
-                            .say(&ctx.http, "This round needs a text reply.")
-                            .await
-                            .map(|_| ())
-                            .map_err(Into::into);
-                    }
-
-                    game.submit_text(player_id, text.to_owned())
-                        .map(|advance| (advance, None))
-                }
-                RoundKind::Drawing => {
-                    let Some(attachment) = message.attachments.iter().find(|attachment| {
-                        attachment
-                            .content_type
-                            .as_deref()
-                            .is_some_and(|content_type| content_type.starts_with("image/"))
-                            || attachment.filename.to_ascii_lowercase().ends_with(".png")
-                            || attachment.filename.to_ascii_lowercase().ends_with(".jpg")
-                            || attachment.filename.to_ascii_lowercase().ends_with(".jpeg")
-                            || attachment.filename.to_ascii_lowercase().ends_with(".webp")
-                    }) else {
-                        return message
-                            .channel_id
-                            .say(&ctx.http, "This round needs an image attachment.")
-                            .await
-                            .map(|_| ())
-                            .map_err(Into::into);
-                    };
-
-                    if let Err(error) = validate_canvas_size(&game.canvas, attachment.dimensions())
-                    {
-                        return message
-                            .channel_id
-                            .say(&ctx.http, error)
-                            .await
-                            .map(|_| ())
-                            .map_err(Into::into);
-                    }
-
-                    let submission_note = canvas_size_constraint_submission_text(&game.canvas);
-
-                    game.submit_drawing(
-                        player_id,
-                        attachment.url.clone(),
-                        attachment.filename.clone(),
-                    )
-                    .map(|advance| (advance, Some(submission_note)))
-                }
-            }
-        }
+        submit_message_to_game(game, message, player_id)
     };
 
     match action {
@@ -568,6 +509,62 @@ pub async fn handle_message(
     Ok(())
 }
 
+fn submit_message_to_game(
+    game: &mut Game,
+    message: &Message,
+    player_id: u64,
+) -> Result<(Advance, Option<String>), Error> {
+    if let Some(pending_advance) = game.pending_next_round() {
+        return Ok((pending_advance, None));
+    }
+
+    match game.round_kind() {
+        RoundKind::Prompt | RoundKind::Naming => {
+            let text = message.content.trim();
+            if text.is_empty() {
+                return Err(anyhow!("This round needs a text reply."));
+            }
+
+            game.submit_text(player_id, text.to_owned())
+                .map(|advance| (advance, None))
+                .map_err(Into::into)
+        }
+        RoundKind::Drawing => {
+            let attachment = message
+                .attachments
+                .iter()
+                .find(|attachment| is_image_attachment(attachment))
+                .ok_or_else(|| anyhow!("This round needs an image attachment."))?;
+
+            validate_canvas_size(&game.canvas, attachment.dimensions())
+                .map_err(|error| anyhow!(error))?;
+            let submission_note = canvas_size_constraint_submission_text(&game.canvas);
+
+            game.submit_drawing(
+                player_id,
+                attachment.url.clone(),
+                attachment.filename.clone(),
+            )
+            .map(|advance| (advance, Some(submission_note)))
+            .map_err(Into::into)
+        }
+    }
+}
+
+fn is_image_attachment(attachment: &serenity::Attachment) -> bool {
+    attachment
+        .content_type
+        .as_deref()
+        .is_some_and(|content_type| content_type.starts_with("image/"))
+        || matches!(
+            attachment
+                .filename
+                .rsplit_once('.')
+                .map(|(_, extension)| extension.to_ascii_lowercase()),
+            Some(extension) if matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "webp")
+        )
+}
+
 pub async fn handle_interaction(
     ctx: &serenity::Context,
     data: &Data,
@@ -613,7 +610,7 @@ pub async fn handle_interaction(
         ButtonAction::Status => {
             let games = data.grateic.games.read().await;
             if let Some(game) = games.get(&key) {
-                if game.players.contains(&user_id) {
+                if game.has_player(user_id) {
                     format_status(game)
                 } else {
                     "This status button belongs to a Grateic game you are not in.".to_owned()
@@ -643,7 +640,7 @@ async fn join_game(data: &Data, key: GameKey, player_id: u64) -> Result<String, 
         let mut games = data.grateic.games.write().await;
         if games
             .iter()
-            .any(|(game_key, game)| *game_key != key && game.players.contains(&player_id))
+            .any(|(game_key, game)| *game_key != key && game.has_player(player_id))
         {
             return Err(GameError::AlreadyInAnotherGame.into());
         }
@@ -910,10 +907,6 @@ async fn send_short_drawing_assignments(
 }
 
 fn status_button_components(key: GameKey) -> Vec<CreateActionRow> {
-    vec![CreateActionRow::Buttons(vec![status_button(key)])]
-}
-
-fn server_status_component(key: GameKey) -> Vec<CreateActionRow> {
     vec![CreateActionRow::Buttons(vec![status_button(key)])]
 }
 

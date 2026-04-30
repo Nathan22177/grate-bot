@@ -222,7 +222,7 @@ impl Game {
             return Err(GameError::AlreadyStarted);
         }
 
-        if self.players.contains(&player_id) {
+        if self.has_player(player_id) {
             return Err(GameError::AlreadyJoined);
         }
 
@@ -236,7 +236,7 @@ impl Game {
             return Err(GameError::NotInLobby);
         }
 
-        if !self.players.contains(&player_id) {
+        if !self.has_player(player_id) {
             return Err(GameError::NotAPlayer);
         }
 
@@ -294,8 +294,7 @@ impl Game {
     pub fn reset_to_lobby_after_failed_start(&mut self, unready_player_id: u64) {
         self.phase = GamePhase::Lobby;
         self.current_round = 0;
-        self.chains.clear();
-        self.submitted_this_round.clear();
+        self.reset_round_state();
         if let GameMode::Short { prompts, drawings } = &mut self.mode {
             prompts.clear();
             drawings.clear();
@@ -490,18 +489,12 @@ impl Game {
         if self.is_short() { "short" } else { "classic" }
     }
 
+    pub fn has_player(&self, player_id: u64) -> bool {
+        self.players.contains(&player_id)
+    }
+
     fn submit(&mut self, player_id: u64, kind: SubmissionKind) -> Result<Advance, GameError> {
-        if self.phase != GamePhase::InProgress {
-            return Err(GameError::NotInProgress);
-        }
-
-        let Some(player_index) = self.players.iter().position(|id| *id == player_id) else {
-            return Err(GameError::NotAPlayer);
-        };
-
-        if self.submitted_this_round.contains(&player_id) {
-            return Err(GameError::AlreadySubmitted);
-        }
+        let player_index = self.ensure_can_submit(player_id)?;
 
         let chain_index = self.assigned_chain_index(player_index);
         self.chains[chain_index].entries.push(ChainEntry {
@@ -546,13 +539,7 @@ impl Game {
             return Err(GameError::ExpectedDrawing);
         }
 
-        if !self.players.contains(&player_id) {
-            return Err(GameError::NotAPlayer);
-        }
-
-        if self.submitted_this_round.contains(&player_id) {
-            return Err(GameError::AlreadySubmitted);
-        }
+        self.ensure_can_submit(player_id)?;
 
         let GameMode::Short { prompts, .. } = &mut self.mode else {
             unreachable!("short prompt submissions only run in short mode");
@@ -587,13 +574,7 @@ impl Game {
             return Err(GameError::ExpectedText);
         }
 
-        if !self.players.contains(&player_id) {
-            return Err(GameError::NotAPlayer);
-        }
-
-        if self.submitted_this_round.contains(&player_id) {
-            return Err(GameError::AlreadySubmitted);
-        }
+        self.ensure_can_submit(player_id)?;
 
         let Some(assignment) = self
             .short_drawing_assignments()
@@ -671,6 +652,27 @@ impl Game {
                 })
             })
             .collect()
+    }
+
+    fn ensure_can_submit(&self, player_id: u64) -> Result<usize, GameError> {
+        if self.phase != GamePhase::InProgress {
+            return Err(GameError::NotInProgress);
+        }
+
+        let Some(player_index) = self.players.iter().position(|id| *id == player_id) else {
+            return Err(GameError::NotAPlayer);
+        };
+
+        if self.submitted_this_round.contains(&player_id) {
+            return Err(GameError::AlreadySubmitted);
+        }
+
+        Ok(player_index)
+    }
+
+    fn reset_round_state(&mut self) {
+        self.chains.clear();
+        self.submitted_this_round.clear();
     }
 }
 
