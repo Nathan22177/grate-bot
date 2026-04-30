@@ -108,10 +108,10 @@ fn sha256_file(path: &Path) -> anyhow::Result<String> {
 }
 
 fn help_message() -> String {
-    let message = "Grate Boss help\n\
+    "Grate Boss help\n\
 \n\
 Broadly, I can help with:\n\
-	- Grateic: host a Discord drawing-and-prompt game. Create a short or full lobby, let players join, start rounds, collect text and drawing submissions in DMs, track status, cancel a lobby, and reveal the finished game.\n\
+    - Grateic: host a Discord drawing-and-prompt game. Create a short or full lobby, let players join, start rounds, collect text and drawing submissions in DMs, track status, cancel a lobby, and reveal the finished game.\n\
 - Build verification: show the running bot version, source ref, commit, build input state, and executable SHA-256 so you can compare the live bot against a release.\n\
 \n\
 Useful commands:\n\
@@ -121,9 +121,7 @@ Useful commands:\n\
 - `/grate hytale help`, `/grate hytale status`, `/grate hytale logs`, `/grate hytale start`, `/grate hytale stop`, `/grate hytale restart`, and `/grate hytale update` manage the Hytale server for members with the configured manager role.\n\
 \n\
 Notes: Grateic game state is kept in memory, so active games reset if I restart."
-        .to_owned();
-
-    message
+        .to_owned()
 }
 
 #[cfg(test)]

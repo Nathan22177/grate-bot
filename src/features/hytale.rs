@@ -527,7 +527,7 @@ fn extract_first_url(line: &str) -> Option<String> {
     let url = line[start..]
         .split(|character: char| character.is_whitespace() || matches!(character, '<' | '>' | ')'))
         .next()?
-        .trim_end_matches(|character| matches!(character, '.' | ',' | ';' | ':'))
+        .trim_end_matches(['.', ',', ';', ':'])
         .to_owned();
 
     (!url.is_empty()).then_some(url)
