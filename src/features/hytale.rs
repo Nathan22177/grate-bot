@@ -200,7 +200,7 @@ async fn run_hytale_command(ctx: Context<'_>, action: HytaleScriptAction) -> Res
     };
 
     ctx.defer_ephemeral().await?;
-    send_ephemeral(ctx, format!("Starting Hytale {}...", action.label())).await?;
+    send_ephemeral(ctx, format!("Starting Hytale {}...", action.arg())).await?;
 
     let output = match run_script_with_progress(ctx, &config, action).await {
         Ok(output) => output,
@@ -209,7 +209,7 @@ async fn run_hytale_command(ctx: Context<'_>, action: HytaleScriptAction) -> Res
                 ctx,
                 format!(
                     "Hytale {} failed: {}",
-                    action.label(),
+                    action.arg(),
                     truncate_inline(&format!("{error:#}"), MAX_RESPONSE_CHARS)
                 ),
             )
@@ -305,17 +305,6 @@ impl HytaleScriptAction {
         }
     }
 
-    fn label(self) -> &'static str {
-        match self {
-            Self::Status => "status",
-            Self::Logs => "logs",
-            Self::Start => "start",
-            Self::Stop => "stop",
-            Self::Restart => "restart",
-            Self::Update => "update",
-        }
-    }
-
     fn timeout(self, config: &HytaleConfig) -> Duration {
         match self {
             Self::Update => config.download_timeout,
@@ -384,7 +373,7 @@ async fn run_script_with_progress(
         .with_context(|| {
             format!(
                 "Hytale {} timed out after {}s",
-                action.label(),
+                action.arg(),
                 action.timeout(config).as_secs()
             )
         })?
@@ -544,7 +533,7 @@ fn format_progress_message(action: HytaleScriptAction, progress: &HytaleProgress
     let progress = display_progress(progress);
     format!(
         "Hytale {} {}: {}",
-        action.label(),
+        action.arg(),
         progress.status,
         truncate_inline(&progress.message, 1_500)
     )
@@ -565,7 +554,7 @@ fn final_response(action: HytaleScriptAction, output: &ScriptOutput) -> String {
         return final_output_response(action, output);
     }
 
-    let label = action.label();
+    let label = action.arg();
     let progress = output.latest_progress.as_ref().map(display_progress);
     let state = progress
         .as_ref()
@@ -605,7 +594,7 @@ fn final_output_response(action: HytaleScriptAction, output: &ScriptOutput) -> S
     } else {
         format!(
             "The Hytale {} command failed.\n\n{}",
-            action.label(),
+            action.arg(),
             output.human_output
         )
     };
