@@ -5,7 +5,6 @@ use serenity::{FullEvent, GatewayIntents};
 use sha2::{Digest, Sha256};
 use std::{fmt::Write as _, path::Path};
 
-#[cfg(feature = "hytale")]
 use crate::features::hytale::hytale;
 
 type Error = anyhow::Error;
@@ -63,16 +62,9 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg_attr(
-    feature = "hytale",
-    poise::command(
-        slash_command,
-        subcommands("help", "create", "grateic", "verify", "hytale")
-    )
-)]
-#[cfg_attr(
-    not(feature = "hytale"),
-    poise::command(slash_command, subcommands("help", "create", "grateic", "verify"))
+#[poise::command(
+    slash_command,
+    subcommands("help", "create", "grateic", "verify", "hytale")
 )]
 async fn grate(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
@@ -126,18 +118,11 @@ Useful commands:\n\
 	- `/grate create` starts a Grateic lobby with mode, canvas size, background, and canvas-size-rule options.\n\
 	- `/grate grateic help`, `/grate grateic join`, `/grate grateic ready`, `/grate grateic start`, `/grate grateic status`, and `/grate grateic cancel` explain or manage a Grateic game.\n\
 - `/grate verify` reports what build is currently running.\n\
+- `/grate hytale help`, `/grate hytale status`, `/grate hytale logs`, `/grate hytale start`, `/grate hytale stop`, `/grate hytale restart`, and `/grate hytale update` manage the Hytale server for members with the configured manager role.\n\
 \n\
 Notes: Grateic game state is kept in memory, so active games reset if I restart."
         .to_owned();
 
-    #[cfg(feature = "hytale")]
-    {
-        let mut message = message;
-        message.push_str("\n\nOptional Hytale management is enabled in this build. Trusted server helpers can use `/grate hytale help`, `/grate hytale status` (unstable), `/grate hytale logs` (unstable), `/grate hytale start` (unstable), `/grate hytale stop` (unstable), and `/grate hytale restart` (unstable) if they have the configured manager role.");
-        message
-    }
-
-    #[cfg(not(feature = "hytale"))]
     message
 }
 
@@ -153,10 +138,7 @@ mod tests {
         assert!(message.contains("Build verification"));
         assert!(message.contains("/grate verify"));
 
-        #[cfg(feature = "hytale")]
         assert!(message.contains("/grate hytale status"));
-
-        #[cfg(not(feature = "hytale"))]
-        assert!(!message.contains("/grate hytale status"));
+        assert!(message.contains("/grate hytale update"));
     }
 }

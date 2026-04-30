@@ -15,12 +15,14 @@ Required for a normal bot server:
 - A runtime environment file containing `DISCORD_TOKEN`.
 - A `systemd` service to keep the bot running after reboot.
 
-Optional for Hytale controls:
+For Hytale controls:
 
-- A binary built with `--features hytale`.
 - A Hytale dedicated server managed by `systemd`.
+- `hytale-manage.sh` and `hytale-update.sh` installed on the same host as the bot.
 - A Discord role ID for trusted Hytale managers.
-- Host permissions for unstable log reads and passwordless start/stop/restart of only the Hytale service.
+- Host permissions needed by the management scripts.
+
+Feature behavior, commands, settings, and troubleshooting for Hytale controls live in [docs/HYTALE.md](docs/HYTALE.md).
 
 ## Discord Bot Setup
 
@@ -54,16 +56,10 @@ Slash commands are registered globally, so Discord can take a little while to sh
 
 ## Build
 
-Default build, without Hytale commands:
+Build the bot:
 
 ```sh
 cargo build --release
-```
-
-Build with optional Hytale controls:
-
-```sh
-cargo build --release --features hytale
 ```
 
 ## Server Setup
@@ -109,40 +105,48 @@ sudo systemctl restart grate-bot.service
 
 ## Hytale Management Setup
 
-Hytale support is optional. Default builds do not include the `/grate hytale` command group. To enable it, build the bot with:
+The Hytale commands assume the bot runs on the same Ubuntu host as the Hytale dedicated server. The bot calls `hytale-manage.sh` for every Hytale action, and the script manages the service through `systemd` as `hytale-server.service` by default. See [docs/HYTALE.md](docs/HYTALE.md) for the full feature explanation.
+
+Install the scripts on the server and make them executable:
 
 ```sh
-cargo build --release --features hytale
+mkdir -p ~/hytale
+cp hytale-manage.sh hytale-update.sh ~/hytale/
+chmod +x ~/hytale/hytale-manage.sh ~/hytale/hytale-update.sh
 ```
 
-The Hytale commands assume the bot runs on the same Ubuntu host as the Hytale dedicated server and that the server is managed by `systemd` as `hytale-server.service`.
-
-Operational Hytale commands are marked unstable for now. Only users with the configured Discord role can run Hytale commands. Set this to the Discord role ID for trusted Hytale managers:
+Only users with the configured Discord role can run Hytale management commands. Set this to the Discord role ID for trusted Hytale managers:
 
 ```sh
 HYTALE_MANAGER_ROLE_ID=123456789012345678
 ```
 
-Optional Hytale settings:
+Hytale settings:
 
 ```sh
 HYTALE_SERVICE_NAME=hytale-server.service
-HYTALE_LOG_LINES=40
 HYTALE_COMMAND_TIMEOUT_SECONDS=15
+HYTALE_DOWNLOAD_TIMEOUT_SECONDS=1800
 ```
 
-If Hytale support is not enabled at build time, these variables are ignored and no Hytale slash commands are registered.
+By default, the bot looks for `hytale-manage.sh` in `~/hytale` for the user running the bot. Set `HYTALE_MANAGE_SCRIPT` only if the script lives somewhere else, and use an absolute path in service environment files.
 
-The bot only runs allowlisted local commands:
+`HYTALE_COMMAND_TIMEOUT_SECONDS` is used for `/grate hytale status`, `logs`, `start`, `stop`, and `restart`. `HYTALE_DOWNLOAD_TIMEOUT_SECONDS` is used for `/grate hytale update` and is passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`.
 
-- `systemctl is-active`, `systemctl is-enabled`, and `systemctl status --no-pager` for unstable status
-- `journalctl -u hytale-server.service -n 40 --no-pager` for unstable logs
-- `sudo -n systemctl start|stop|restart hytale-server.service` for unstable server actions
+The bot only calls the configured management script with one allowlisted action:
 
-The bot's host user needs passwordless sudo for only the Hytale service actions. Replace `BOT_USER` with the Linux user that runs the bot:
+- `status`
+- `logs`
+- `start`
+- `stop`
+- `restart`
+- `update`
+
+The scripts use `sudo -n`, so the bot's host user needs passwordless sudo for the commands the scripts run. Replace `BOT_USER` with the Linux user that runs the bot:
 
 ```sudoers
 BOT_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start hytale-server.service, /usr/bin/systemctl stop hytale-server.service, /usr/bin/systemctl restart hytale-server.service
+BOT_USER ALL=(root) NOPASSWD: /usr/bin/apt, /usr/bin/dpkg, /usr/bin/tee, /usr/bin/test
 ```
 
 The bot's host user also needs permission to read service logs with `journalctl`. On Ubuntu, that usually means adding the bot user to a journal-reading group such as `systemd-journal`.
@@ -153,20 +157,8 @@ The bot's host user also needs permission to read service logs with `journalctl`
 cargo run
 ```
 
-Run locally with optional Hytale commands:
-
-```sh
-cargo run --features hytale
-```
-
 ## Test
 
 ```sh
 cargo test
-```
-
-Test the optional Hytale code too:
-
-```sh
-cargo test --all-features
 ```
