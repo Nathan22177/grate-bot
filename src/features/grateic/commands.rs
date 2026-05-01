@@ -10,36 +10,43 @@ use crate::bot::{Context, Data};
 use anyhow::anyhow;
 use poise::serenity_prelude as serenity;
 use serenity::{
-    ButtonStyle, CreateActionRow, CreateAttachment, CreateButton, CreateEmbed,
-    CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage,
-    EditInteractionResponse, Interaction, Message, UserId,
+    ButtonStyle, ChannelId, CreateActionRow, CreateAllowedMentions, CreateAttachment, CreateButton,
+    CreateEmbed, CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage,
+    EditInteractionResponse, EditMessage, Interaction, Message, MessageId, UserId,
 };
 use std::time::Duration;
 
 type Error = anyhow::Error;
 const BUTTON_PREFIX: &str = "grateic:";
+const PROMPT_CHARACTER_LIMIT: usize = 140;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ButtonAction {
     Join,
+    Leave,
     Status,
     Start,
+    Cancel,
 }
 
 impl ButtonAction {
     fn slug(self) -> &'static str {
         match self {
             Self::Join => "join",
+            Self::Leave => "leave",
             Self::Status => "status",
             Self::Start => "start",
+            Self::Cancel => "cancel",
         }
     }
 
     fn from_slug(slug: &str) -> Option<Self> {
         match slug {
             "join" => Some(Self::Join),
+            "leave" => Some(Self::Leave),
             "status" => Some(Self::Status),
             "start" => Some(Self::Start),
+            "cancel" => Some(Self::Cancel),
             _ => None,
         }
     }
@@ -128,7 +135,7 @@ pub enum HelpTopicChoice {
 
 #[poise::command(
     slash_command,
-    subcommands("help", "join", "ready", "start", "status", "cancel")
+    subcommands("help", "join", "ready", "start", "status", "cancel", "force_cancel")
 )]
 pub async fn grateic(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
@@ -172,29 +179,26 @@ pub async fn create(
         games.insert(key, game);
     }
 
-    let content = match mode {
-        GameModeChoice::Short => format!(
-            "Short Grateic lobby created by <@{}>. Everyone will write one prompt, draw one prompt from another player, then the showcases reveal. Canvas: {} {}. {} Use `/grate grateic join` to play.",
-            ctx.author().id.get(),
-            canvas.preset.label(),
-            canvas.background_hex,
-            canvas_size_constraint_summary(&canvas)
-        ),
-        GameModeChoice::Full => format!(
-            "Grateic lobby created by <@{}>. Canvas: {} {}. {} Use `/grate grateic join` to play. If I cannot DM someone on start, they can fix DMs and run `/grate grateic ready`.",
-            ctx.author().id.get(),
-            canvas.preset.label(),
-            canvas.background_hex,
-            canvas_size_constraint_summary(&canvas)
-        ),
+    let content = {
+        let games = ctx.data().grateic.games.read().await;
+        let game = games.get(&key).ok_or(GameError::GameNotFound)?;
+        format_game_status(game)
     };
 
-    ctx.send(
-        poise::CreateReply::default()
-            .content(content)
-            .components(server_control_components(key)),
-    )
-    .await?;
+    let reply = ctx
+        .send(
+            poise::CreateReply::default()
+                .content(content)
+                .allowed_mentions(no_ping_mentions())
+                .components(lobby_control_components(key)),
+        )
+        .await?;
+    let message = reply.into_message().await?;
+    {
+        let mut games = ctx.data().grateic.games.write().await;
+        let game = games.get_mut(&key).ok_or(GameError::GameNotFound)?;
+        game.set_lobby_message_id(message.id.get());
+    }
 
     Ok(())
 }
@@ -217,10 +221,14 @@ async fn join(ctx: Context<'_>) -> Result<(), Error> {
     let key = active_game_key_from_context(ctx).await?;
     let player_id = ctx.author().id.get();
 
+    let content = join_game(ctx.data(), key, player_id).await?;
+    update_lobby_message(ctx.serenity_context(), ctx.data(), key).await?;
+
     ctx.send(
         poise::CreateReply::default()
-            .content(join_game(ctx.data(), key, player_id).await?)
-            .components(server_control_components(key)),
+            .content(content)
+            .allowed_mentions(no_ping_mentions())
+            .ephemeral(true),
     )
     .await?;
 
@@ -246,9 +254,14 @@ async fn ready(ctx: Context<'_>) -> Result<(), Error> {
     }
 
     if let Err(error) = send_ready_dm(ctx.serenity_context(), player_id).await {
-        ctx.say(format!(
-            "I still cannot DM <@{player_id}>. Enable DMs from this server, then run `/grate grateic ready` again. ({error})"
-        ))
+        ctx.send(
+            poise::CreateReply::default()
+                .content(format!(
+                    "I still cannot DM <@{player_id}>. Enable DMs from this server, then run `/grate grateic ready` again. ({error})"
+                ))
+                .allowed_mentions(no_ping_mentions())
+                .ephemeral(true),
+        )
         .await?;
         return Ok(());
     }
@@ -259,13 +272,15 @@ async fn ready(ctx: Context<'_>) -> Result<(), Error> {
         game.mark_ready(player_id)?;
         (game.ready_count(), game.players.len())
     };
+    update_lobby_message(ctx.serenity_context(), ctx.data(), key).await?;
 
     ctx.send(
         poise::CreateReply::default()
             .content(format!(
                 "<@{player_id}> is ready. Ready players: {ready_count}/{player_count}."
             ))
-            .components(server_control_components(key)),
+            .allowed_mentions(no_ping_mentions())
+            .ephemeral(true),
     )
     .await?;
 
@@ -276,11 +291,14 @@ async fn ready(ctx: Context<'_>) -> Result<(), Error> {
 async fn start(ctx: Context<'_>) -> Result<(), Error> {
     let key = active_game_key_from_context(ctx).await?;
     let requester_id = ctx.author().id.get();
+    let content = start_game(ctx.serenity_context(), ctx.data(), key, requester_id).await?;
+    update_lobby_message(ctx.serenity_context(), ctx.data(), key).await?;
 
     ctx.send(
         poise::CreateReply::default()
-            .content(start_game(ctx.serenity_context(), ctx.data(), key, requester_id).await?)
-            .components(status_button_components(key)),
+            .content(content)
+            .allowed_mentions(no_ping_mentions())
+            .ephemeral(true),
     )
     .await?;
 
@@ -294,13 +312,21 @@ async fn status(ctx: Context<'_>) -> Result<(), Error> {
     let response = {
         let games = ctx.data().grateic.games.read().await;
         let game = games.get(&key).ok_or(GameError::GameNotFound)?;
-        format_status(game)
+        if game.phase == GamePhase::Lobby {
+            "Lobby status refreshed in the original lobby message.".to_owned()
+        } else if game.has_player(ctx.author().id.get()) {
+            format_dm_status(game, ctx.author().id.get())
+        } else {
+            return Err(GameError::NotAPlayer.into());
+        }
     };
+    update_lobby_message(ctx.serenity_context(), ctx.data(), key).await?;
 
     ctx.send(
         poise::CreateReply::default()
             .content(response)
-            .components(server_control_components(key)),
+            .allowed_mentions(no_ping_mentions())
+            .ephemeral(true),
     )
     .await?;
     Ok(())
@@ -311,14 +337,49 @@ async fn cancel(ctx: Context<'_>) -> Result<(), Error> {
     let key = active_game_key_from_context(ctx).await?;
     let requester_id = ctx.author().id.get();
 
-    {
+    let cancelled_game = {
         let mut games = ctx.data().grateic.games.write().await;
         let game = games.get_mut(&key).ok_or(GameError::GameNotFound)?;
         game.cancel(requester_id)?;
-        games.remove(&key);
-    }
+        games.remove(&key).ok_or(GameError::GameNotFound)?
+    };
 
-    ctx.say("Grateic game cancelled.").await?;
+    edit_lobby_message_for_game(
+        ctx.serenity_context(),
+        &cancelled_game,
+        "Grateic Phone game cancelled.",
+        Vec::new(),
+    )
+    .await?;
+    ctx.send(
+        poise::CreateReply::default()
+            .content("Grateic Phone game cancelled.")
+            .ephemeral(true),
+    )
+    .await?;
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+async fn force_cancel(ctx: Context<'_>) -> Result<(), Error> {
+    let key = active_game_key_from_context(ctx).await?;
+    let requester_id = ctx.author().id.get();
+
+    let cancelled_game = force_cancel_game(ctx.data(), key, requester_id).await?;
+
+    edit_lobby_message_for_game(
+        ctx.serenity_context(),
+        &cancelled_game,
+        "Grateic Phone game force-cancelled.",
+        Vec::new(),
+    )
+    .await?;
+    ctx.send(
+        poise::CreateReply::default()
+            .content("Grateic Phone game force-cancelled.")
+            .ephemeral(true),
+    )
+    .await?;
     Ok(())
 }
 
@@ -520,10 +581,7 @@ fn submit_message_to_game(
 
     match game.round_kind() {
         RoundKind::Prompt | RoundKind::Naming => {
-            let text = message.content.trim();
-            if text.is_empty() {
-                return Err(anyhow!("This round needs a text reply."));
-            }
+            let text = validate_text_message(message)?;
 
             game.submit_text(player_id, text.to_owned())
                 .map(|advance| (advance, None))
@@ -549,6 +607,29 @@ fn submit_message_to_game(
             .map_err(Into::into)
         }
     }
+}
+
+fn validate_text_message(message: &Message) -> Result<String, Error> {
+    validate_text_submission_content(&message.content, !message.sticker_items.is_empty())
+}
+
+fn validate_text_submission_content(content: &str, has_sticker: bool) -> Result<String, Error> {
+    if has_sticker {
+        return Err(anyhow!("Discord stickers cannot be used as prompts."));
+    }
+
+    let text = content.trim();
+    if text.is_empty() {
+        return Err(anyhow!("This round needs a text reply."));
+    }
+
+    if text.chars().count() > PROMPT_CHARACTER_LIMIT {
+        return Err(anyhow!(
+            "Text submissions must be {PROMPT_CHARACTER_LIMIT} characters or fewer."
+        ));
+    }
+
+    Ok(text.to_owned())
 }
 
 fn is_image_attachment(attachment: &serenity::Attachment) -> bool {
@@ -590,33 +671,70 @@ pub async fn handle_interaction(
             .await?;
 
         let content = match start_game(ctx, data, key, user_id).await {
-            Ok(content) => content,
+            Ok(content) => {
+                let _ = update_lobby_message(ctx, data, key).await;
+                content
+            }
             Err(error) => error.to_string(),
         };
 
         component
-            .edit_response(&ctx.http, EditInteractionResponse::new().content(content))
+            .edit_response(
+                &ctx.http,
+                EditInteractionResponse::new()
+                    .content(content)
+                    .allowed_mentions(no_ping_mentions()),
+            )
             .await?;
 
         return Ok(());
     }
 
     let content = match action {
-        ButtonAction::Join => match join_game(data, key, user_id).await {
-            Ok(content) => content,
+        ButtonAction::Join => match toggle_lobby_membership(data, key, user_id).await {
+            Ok(content) => {
+                let _ = update_lobby_message(ctx, data, key).await;
+                content
+            }
+            Err(error) => error.to_string(),
+        },
+        ButtonAction::Leave => match leave_game(data, key, user_id).await {
+            Ok(content) => {
+                let _ = update_lobby_message(ctx, data, key).await;
+                content
+            }
             Err(error) => error.to_string(),
         },
         ButtonAction::Start => unreachable!("start buttons are deferred before dispatch"),
+        ButtonAction::Cancel => match cancel_game(data, key, user_id).await {
+            Ok(game) => {
+                let _ = edit_lobby_message_for_game(
+                    ctx,
+                    &game,
+                    "Grateic Phone game cancelled.",
+                    Vec::new(),
+                )
+                .await;
+                "Grateic Phone game cancelled.".to_owned()
+            }
+            Err(error) => error.to_string(),
+        },
         ButtonAction::Status => {
             let games = data.grateic.games.read().await;
             if let Some(game) = games.get(&key) {
                 if game.has_player(user_id) {
-                    format_status(game)
+                    if game.phase == GamePhase::Lobby {
+                        drop(games);
+                        let _ = update_lobby_message(ctx, data, key).await;
+                        "Lobby status refreshed in the original lobby message.".to_owned()
+                    } else {
+                        format_dm_status(game, user_id)
+                    }
                 } else {
-                    "This status button belongs to a Grateic game you are not in.".to_owned()
+                    "This status button belongs to a Grateic Phone game you are not in.".to_owned()
                 }
             } else {
-                "That Grateic game is no longer active.".to_owned()
+                "That Grateic Phone game is no longer active.".to_owned()
             }
         }
     };
@@ -627,6 +745,7 @@ pub async fn handle_interaction(
             CreateInteractionResponse::Message(
                 CreateInteractionResponseMessage::new()
                     .content(content)
+                    .allowed_mentions(no_ping_mentions())
                     .ephemeral(true),
             ),
         )
@@ -651,8 +770,69 @@ async fn join_game(data: &Data, key: GameKey, player_id: u64) -> Result<String, 
     };
 
     Ok(format!(
-        "<@{player_id}> joined the Grateic lobby. Players: {player_count}."
+        "<@{player_id}> joined the Grateic Phone lobby. Players: {player_count}."
     ))
+}
+
+async fn leave_game(data: &Data, key: GameKey, player_id: u64) -> Result<String, Error> {
+    let player_count = {
+        let mut games = data.grateic.games.write().await;
+        let game = games.get_mut(&key).ok_or(GameError::GameNotFound)?;
+        game.leave(player_id)?;
+        game.players.len()
+    };
+
+    Ok(format!(
+        "<@{player_id}> left the Grateic Phone lobby. Players: {player_count}."
+    ))
+}
+
+async fn toggle_lobby_membership(
+    data: &Data,
+    key: GameKey,
+    player_id: u64,
+) -> Result<String, Error> {
+    let mut games = data.grateic.games.write().await;
+
+    if games
+        .iter()
+        .any(|(game_key, game)| *game_key != key && game.has_player(player_id))
+    {
+        return Err(GameError::AlreadyInAnotherGame.into());
+    }
+
+    let game = games.get_mut(&key).ok_or(GameError::GameNotFound)?;
+    if game.has_player(player_id) {
+        game.leave(player_id)?;
+        Ok(format!(
+            "<@{player_id}> left the Grateic Phone lobby. Players: {}.",
+            game.players.len()
+        ))
+    } else {
+        game.join(player_id)?;
+        Ok(format!(
+            "<@{player_id}> joined the Grateic Phone lobby. Players: {}.",
+            game.players.len()
+        ))
+    }
+}
+
+async fn cancel_game(data: &Data, key: GameKey, requester_id: u64) -> Result<Game, Error> {
+    let mut games = data.grateic.games.write().await;
+    let game = games.get_mut(&key).ok_or(GameError::GameNotFound)?;
+    game.cancel(requester_id)?;
+    games
+        .remove(&key)
+        .ok_or_else(|| GameError::GameNotFound.into())
+}
+
+async fn force_cancel_game(data: &Data, key: GameKey, requester_id: u64) -> Result<Game, Error> {
+    let mut games = data.grateic.games.write().await;
+    let game = games.get_mut(&key).ok_or(GameError::GameNotFound)?;
+    game.force_cancel(requester_id)?;
+    games
+        .remove(&key)
+        .ok_or_else(|| GameError::GameNotFound.into())
 }
 
 async fn start_game(
@@ -759,7 +939,7 @@ async fn send_ready_dm(ctx: &serenity::Context, player_id: u64) -> Result<(), Er
     channel
         .say(
             &ctx.http,
-            "DM check passed. You are ready for the Grateic game.",
+            "DM check passed. You are ready for the Grateic Phone game.",
         )
         .await?;
 
@@ -771,6 +951,53 @@ async fn mark_failed_start(data: &Data, key: GameKey, player_id: u64) {
     if let Some(game) = games.get_mut(&key) {
         game.reset_to_lobby_after_failed_start(player_id);
     }
+}
+
+async fn update_lobby_message(
+    ctx: &serenity::Context,
+    data: &Data,
+    key: GameKey,
+) -> Result<(), Error> {
+    let game = {
+        let games = data.grateic.games.read().await;
+        games.get(&key).cloned()
+    };
+
+    let Some(game) = game else {
+        return Ok(());
+    };
+
+    let components = if game.phase == GamePhase::Lobby {
+        lobby_control_components(key)
+    } else {
+        Vec::new()
+    };
+    edit_lobby_message_for_game(ctx, &game, &format_game_status(&game), components).await
+}
+
+async fn edit_lobby_message_for_game(
+    ctx: &serenity::Context,
+    game: &Game,
+    content: &str,
+    components: Vec<CreateActionRow>,
+) -> Result<(), Error> {
+    let Some(message_id) = game.lobby_message_id else {
+        return Ok(());
+    };
+
+    ChannelId::new(game.key.channel_id)
+        .edit_message(
+            &ctx.http,
+            MessageId::new(message_id),
+            EditMessage::new()
+                .content(content)
+                .allowed_mentions(no_ping_mentions())
+                .components(components),
+        )
+        .await
+        .ok();
+
+    Ok(())
 }
 
 async fn send_classic_start_dm(
@@ -786,7 +1013,7 @@ async fn send_classic_start_dm(
             &ctx.http,
             CreateMessage::new()
                 .content(format!(
-                    "Your Grateic canvas is {}x{} with background {}. {}\n\n{}",
+                    "Your Grateic Phone canvas is {}x{} with background {}. {}\n\n{}",
                     delivery.width,
                     delivery.height,
                     delivery.background_hex,
@@ -806,6 +1033,7 @@ async fn send_classic_start_dm(
                     delivery.canvas_png.to_vec(),
                     "grateic-canvas.png",
                 ))
+                .allowed_mentions(no_ping_mentions())
                 .components(status_button_components(delivery.key)),
         )
         .await?;
@@ -825,7 +1053,7 @@ async fn send_short_prompt_start_dm(
             &ctx.http,
             CreateMessage::new()
                 .content(format!(
-                    "Your short Grateic canvas is {}x{} with background {}. {}\n\nRound 1: reply here with one prompt. After everyone submits, another player will draw it.",
+                    "Your short Grateic Phone canvas is {}x{} with background {}. {}\n\nRound 1: reply here with one prompt. After everyone submits, another player will draw it.",
                     delivery.width,
                     delivery.height,
                     delivery.background_hex,
@@ -839,6 +1067,7 @@ async fn send_short_prompt_start_dm(
                     delivery.canvas_png.to_vec(),
                     "grateic-canvas.png",
                 ))
+                .allowed_mentions(no_ping_mentions())
                 .components(status_button_components(delivery.key)),
         )
         .await?;
@@ -868,6 +1097,7 @@ async fn send_assignments(
                         width,
                         height,
                     ))
+                    .allowed_mentions(no_ping_mentions())
                     .components(status_button_components(key)),
             )
             .await?;
@@ -893,11 +1123,11 @@ async fn send_short_drawing_assignments(
                 &ctx.http,
                 CreateMessage::new()
                     .content(format!(
-                        "Short Grateic drawing round: draw this prompt from another player, then upload your image here. {}\n\n<@{}> wrote:\n{}",
+                        "Short Grateic Phone drawing round: draw this prompt from another player, then upload your image here. {}\n\n{}",
                         drawing_round_constraint_text(canvas.require_canvas_size, width, height),
-                        assignment.prompt_author_id,
                         assignment.prompt
                     ))
+                    .allowed_mentions(no_ping_mentions())
                     .components(status_button_components(key)),
             )
             .await?;
@@ -910,15 +1140,18 @@ fn status_button_components(key: GameKey) -> Vec<CreateActionRow> {
     vec![CreateActionRow::Buttons(vec![status_button(key)])]
 }
 
-fn server_control_components(key: GameKey) -> Vec<CreateActionRow> {
+fn lobby_control_components(key: GameKey) -> Vec<CreateActionRow> {
     vec![CreateActionRow::Buttons(vec![
         CreateButton::new(button_custom_id(ButtonAction::Join, key))
-            .label("Join")
+            .label("Join / Leave")
             .style(ButtonStyle::Success),
         status_button(key),
         CreateButton::new(button_custom_id(ButtonAction::Start, key))
             .label("Start")
             .style(ButtonStyle::Primary),
+        CreateButton::new(button_custom_id(ButtonAction::Cancel, key))
+            .label("Cancel")
+            .style(ButtonStyle::Danger),
     ])]
 }
 
@@ -957,14 +1190,34 @@ fn parse_button_custom_id(custom_id: &str) -> Option<(ButtonAction, GameKey)> {
     ))
 }
 
-fn format_status(game: &Game) -> String {
+fn no_ping_mentions() -> CreateAllowedMentions {
+    CreateAllowedMentions::new()
+}
+
+fn format_game_status(game: &Game) -> String {
     let (width, height) = game.canvas.preset.dimensions();
     let waiting_count = game.players.len().saturating_sub(game.submitted_count());
+    let start_hint = if game.phase == GamePhase::Lobby {
+        if game.players.len() < 2 {
+            "Start: waiting for at least 2 players.".to_owned()
+        } else if game.unready_players().is_empty() {
+            "Start: ready when the host presses Start.".to_owned()
+        } else {
+            format!(
+                "Start: waiting for ready checks from {}.",
+                mention_list(&game.unready_players())
+            )
+        }
+    } else {
+        "Start: game has already started.".to_owned()
+    };
 
     format!(
-        "Mode: {}\nHost: <@{}>\nPlayers: {}\nPhase: {:?}\nRound: {}/{}\nSubmitted this round: {}/{}\nWaiting for inputs: {}\nReady: {}/{}\nNeeds ready: {}\nCanvas: {} {}x{} {}\nDrawing size rule: {}",
+        "Grateic Phone lobby\nMode: {}\nHost: <@{}>\nPlayers joined ({}/{} minimum): {}\nPhase: {:?}\nRound: {}/{}\nSubmitted this round: {}/{}\nWaiting for inputs: {}\nReady: {}/{}\nNeeds ready: {}\nCanvas: {} {}x{} {}\nDrawing size rule: {}\n{}",
         game.mode_label(),
         game.host_id,
+        game.players.len(),
+        2,
         game.players
             .iter()
             .map(|player_id| format!("<@{player_id}>"))
@@ -991,7 +1244,41 @@ fn format_status(game: &Game) -> String {
         width,
         height,
         game.canvas.background_hex,
-        canvas_size_constraint_summary(&game.canvas)
+        canvas_size_constraint_summary(&game.canvas),
+        start_hint
+    )
+}
+
+fn format_dm_status(game: &Game, requester_id: u64) -> String {
+    let waiting_count = game.players.len().saturating_sub(game.submitted_count());
+    let requester_status = if game.phase == GamePhase::InProgress {
+        if game.has_submitted(requester_id) {
+            "You have submitted this round."
+        } else {
+            "You have not submitted this round yet."
+        }
+    } else {
+        "This game is not currently collecting submissions."
+    };
+
+    format!(
+        "Grateic Phone status\nMode: {}\nPhase: {:?}\nRound: {}/{}\nSubmitted this round: {}/{}\nWaiting for inputs: {}\n{}",
+        game.mode_label(),
+        game.phase,
+        if game.phase == GamePhase::Lobby {
+            0
+        } else {
+            game.current_round + 1
+        },
+        game.total_rounds(),
+        game.submitted_count(),
+        game.players.len(),
+        if game.phase == GamePhase::InProgress {
+            waiting_count.to_string()
+        } else {
+            "not in progress".to_owned()
+        },
+        requester_status
     )
 }
 
@@ -1071,7 +1358,7 @@ fn assignment_message_content(
         (RoundKind::Drawing, Some(previous)) => format!(
             "Drawing round: draw from the latest chain entry, then upload your image here. {}\n\n{}",
             drawing_round_constraint_text(require_canvas_size, width, height),
-            describe_entry(previous)
+            describe_entry_for_drawing(previous)
         ),
         (RoundKind::Naming, Some(previous)) => format!(
             "Final naming round: this is what your original prompt became. Reply with a name/title for it.\n\n{}",
@@ -1091,7 +1378,7 @@ async fn reveal_game(
         .say(
             &ctx.http,
             format!(
-                "Grateic reveal: {} players, {} rounds.",
+                "Grateic Phone reveal: {} players, {} rounds.",
                 game.players.len(),
                 game.total_rounds()
             ),
@@ -1102,11 +1389,13 @@ async fn reveal_game(
         channel_id
             .send_message(
                 &ctx.http,
-                CreateMessage::new().embed(
-                    CreateEmbed::new()
-                        .title(format!("Chain {}", chain_index + 1))
-                        .description(format!("Started by <@{}>", chain.original_player_id)),
-                ),
+                CreateMessage::new()
+                    .allowed_mentions(no_ping_mentions())
+                    .embed(
+                        CreateEmbed::new()
+                            .title(format!("Chain {}", chain_index + 1))
+                            .description(format!("Started by <@{}>", chain.original_player_id)),
+                    ),
             )
             .await?;
 
@@ -1116,15 +1405,17 @@ async fn reveal_game(
                     channel_id
                         .send_message(
                             &ctx.http,
-                            CreateMessage::new().embed(
-                                CreateEmbed::new()
-                                    .title(format!(
-                                        "{}. <@{}> wrote",
-                                        entry_index + 1,
-                                        entry.author_id
-                                    ))
-                                    .description(text),
-                            ),
+                            CreateMessage::new()
+                                .allowed_mentions(no_ping_mentions())
+                                .embed(
+                                    CreateEmbed::new()
+                                        .title(format!(
+                                            "{}. <@{}> wrote",
+                                            entry_index + 1,
+                                            entry.author_id
+                                        ))
+                                        .description(text),
+                                ),
                         )
                         .await?;
                 }
@@ -1132,28 +1423,32 @@ async fn reveal_game(
                     channel_id
                         .send_message(
                             &ctx.http,
-                            CreateMessage::new().embed(
-                                CreateEmbed::new()
-                                    .title(format!(
-                                        "{}. <@{}> named it",
-                                        entry_index + 1,
-                                        entry.author_id
-                                    ))
-                                    .description(text),
-                            ),
+                            CreateMessage::new()
+                                .allowed_mentions(no_ping_mentions())
+                                .embed(
+                                    CreateEmbed::new()
+                                        .title(format!(
+                                            "{}. <@{}> named it",
+                                            entry_index + 1,
+                                            entry.author_id
+                                        ))
+                                        .description(text),
+                                ),
                         )
                         .await?;
                 }
                 SubmissionKind::Drawing { attachment_url, .. } => {
                     channel_id
-                        .say(
+                        .send_message(
                             &ctx.http,
-                            format!(
-                                "{}. <@{}> drew:\n{}",
-                                entry_index + 1,
-                                entry.author_id,
-                                attachment_url
-                            ),
+                            CreateMessage::new()
+                                .content(format!(
+                                    "{}. <@{}> drew:\n{}",
+                                    entry_index + 1,
+                                    entry.author_id,
+                                    attachment_url
+                                ))
+                                .allowed_mentions(no_ping_mentions()),
                         )
                         .await?;
                 }
@@ -1175,7 +1470,10 @@ async fn reveal_short_game(
     channel_id
         .say(
             &ctx.http,
-            format!("Short Grateic showcase: {} drawings.", showcases.len()),
+            format!(
+                "Short Grateic Phone showcase: {} drawings.",
+                showcases.len()
+            ),
         )
         .await?;
 
@@ -1183,15 +1481,19 @@ async fn reveal_short_game(
         channel_id
             .send_message(
                 &ctx.http,
-                CreateMessage::new().embed(
-                    CreateEmbed::new()
-                        .title(format!("Showcase {}", index + 1))
-                        .description(format!(
-                            "<@{}> prompted:\n{}\n\n<@{}> drew:",
-                            showcase.prompt_author_id, showcase.prompt, showcase.drawing_author_id
-                        ))
-                        .image(showcase.attachment_url.clone()),
-                ),
+                CreateMessage::new()
+                    .allowed_mentions(no_ping_mentions())
+                    .embed(
+                        CreateEmbed::new()
+                            .title(format!("Showcase {}", index + 1))
+                            .description(format!(
+                                "<@{}> prompted:\n{}\n\n<@{}> drew:",
+                                showcase.prompt_author_id,
+                                showcase.prompt,
+                                showcase.drawing_author_id
+                            ))
+                            .image(showcase.attachment_url.clone()),
+                    ),
             )
             .await?;
 
@@ -1211,6 +1513,14 @@ fn describe_entry(entry: &ChainEntry) -> String {
     }
 }
 
+fn describe_entry_for_drawing(entry: &ChainEntry) -> String {
+    match &entry.kind {
+        SubmissionKind::Prompt(text) => format!("Prompt:\n{text}"),
+        SubmissionKind::Name(text) => format!("Name:\n{text}"),
+        SubmissionKind::Drawing { attachment_url, .. } => format!("Drawing:\n{attachment_url}"),
+    }
+}
+
 fn mention_list(user_ids: &[u64]) -> String {
     if user_ids.is_empty() {
         return "nobody".to_owned();
@@ -1226,16 +1536,16 @@ fn mention_list(user_ids: &[u64]) -> String {
 fn grateic_help_text(topic: HelpTopicChoice) -> &'static str {
     match topic {
         HelpTopicChoice::Overview => {
-            "Grateic help: create a lobby with `/grate create`, then players use `/grate grateic join`, and the host uses `/grate grateic start`.\n\nUse the `topic` option on `/grate grateic help` for focused help: `commands`, `create settings`, `modes`, `game flow examples`, or `canvas size rule`.\n\nDefault behavior: `/grate create` requires a mode, preset, and background. `custom_background` is only needed for `custom hex`. `require_canvas_size` defaults to enabled, so drawing uploads must match the selected canvas size unless the host turns it off."
+            "Grateic Phone help: create a lobby with `/grate create`, then players use `/grate grateic join`, and the host uses `/grate grateic start`.\n\nUse the `topic` option on `/grate grateic help` for focused help: `commands`, `create settings`, `modes`, `game flow examples`, or `canvas size rule`.\n\nDefault behavior: `/grate create` requires a mode, preset, and background. `custom_background` is only needed for `custom hex`. `require_canvas_size` defaults to enabled, so drawing uploads must match the selected canvas size unless the host turns it off."
         }
         HelpTopicChoice::Commands => {
-            "Grateic commands:\n`/grate create`: create a Grateic lobby. Choose `mode`, `preset`, and `background`.\n`/grate grateic join`: join the active lobby in this server.\n`/grate grateic ready`: retry the DM check if the bot could not DM you.\n`/grate grateic start`: host-only; starts the active lobby after at least 2 players join.\n`/grate grateic status`: show host, players, mode, round, readiness, canvas, and waiting count.\n`/grate grateic cancel`: host-only; cancel the active lobby.\n`/grate grateic help`: explain commands, settings, modes, and rules."
+            "Grateic Phone commands:\n`/grate create`: create a Grateic Phone lobby. Choose `mode`, `preset`, and `background`.\n`/grate grateic join`: join the active lobby in this server.\n`/grate grateic ready`: retry the DM check if the bot could not DM you.\n`/grate grateic start`: host-only; starts the active lobby after at least 2 players join.\n`/grate grateic status`: refresh lobby status before start, or privately show in-progress round status.\n`/grate grateic cancel`: host-only; cancel the active lobby before it starts.\n`/grate grateic force_cancel`: host-only; force-cancel a stuck active game.\n`/grate grateic help`: explain commands, settings, modes, and rules."
         }
         HelpTopicChoice::CreateSettings => {
             "`/grate create` settings:\n`mode`: `short` is one prompt plus one drawing. `full` is the full telephone-style chain game.\n`preset`: canvas size. `square` is 1024x1024, `portrait` is 1080x1920, `landscape` is 1920x1080.\n`background`: canvas background color preset. Choose `custom hex` only when you want your own color.\n`custom_background`: required only when `background` is `custom hex`; use `#RRGGBB`, like `#ff00aa`.\n`require_canvas_size`: optional. Defaults to `true`. When `false`, drawing uploads can use any image size."
         }
         HelpTopicChoice::Modes => {
-            "Grateic modes:\n`short`: everyone submits one prompt, then each player gets one prompt from another player, uploads one drawing, and the bot reveals showcases.\n`full`: everyone submits an initial prompt, chains rotate through alternating drawing and prompt rounds, then each original author names the final drawing before reveal.\n\nBoth modes use DMs for submissions. Both modes send the selected blank canvas at start. Both modes use the same canvas size rule."
+            "Grateic Phone modes:\n`short`: everyone submits one prompt, then each player gets one prompt from another player, uploads one drawing, and the bot reveals showcases.\n`full`: everyone submits an initial prompt, chains rotate through alternating drawing and prompt rounds, then each original author names the final drawing before reveal.\n\nBoth modes use DMs for submissions. Both modes send the selected blank canvas at start. Both modes use the same canvas size rule."
         }
         HelpTopicChoice::GameFlowExamples => {
             "Example short flow with 3 players:\n1. A, B, and C each submit one prompt.\n2. A draws C's prompt, B draws A's prompt, C draws B's prompt.\n3. After all drawings are uploaded, the bot posts each prompt with its drawing as showcases.\n\nExample full flow with 3 players:\n1. A, B, and C each submit an initial prompt.\n2. Next round, each player draws a different prompt.\n3. Next round, each player describes a drawing for the next player.\n4. Drawing and prompt rounds keep rotating.\n5. Final round, original authors name the final drawing from their chain.\n6. The bot reveals every chain."
@@ -1283,6 +1593,27 @@ mod tests {
         }
     }
 
+    fn game_with_players(count: u64) -> Game {
+        let mut game = Game::new(test_key(), 1, canvas(true));
+
+        for player_id in 2..=count {
+            game.join(player_id).unwrap();
+        }
+
+        game
+    }
+
+    fn test_key() -> GameKey {
+        GameKey {
+            guild_id: 1,
+            channel_id: 10,
+        }
+    }
+
+    async fn insert_game(data: &Data, game: Game) {
+        data.grateic.games.write().await.insert(game.key, game);
+    }
+
     #[test]
     fn canvas_size_validation_accepts_exact_match_when_enabled() {
         assert_eq!(
@@ -1314,5 +1645,95 @@ mod tests {
             Ok(())
         );
         assert_eq!(validate_canvas_size(&canvas(false), None), Ok(()));
+    }
+
+    #[test]
+    fn text_submission_validation_rejects_stickers() {
+        let error = validate_text_submission_content("draw a house", true).unwrap_err();
+
+        assert!(error.to_string().contains("stickers"));
+    }
+
+    #[test]
+    fn text_submission_validation_caps_at_140_characters_after_trimming() {
+        assert_eq!(
+            validate_text_submission_content(&format!("  {}  ", "a".repeat(140)), false).unwrap(),
+            "a".repeat(140)
+        );
+
+        let error = validate_text_submission_content(&"a".repeat(141), false).unwrap_err();
+        assert!(error.to_string().contains("140"));
+    }
+
+    #[test]
+    fn live_lobby_status_lists_joined_players() {
+        let game = game_with_players(3);
+        let status = format_game_status(&game);
+
+        assert!(status.contains("Grateic Phone lobby"));
+        assert!(status.contains("Players joined (3/2 minimum): <@1>, <@2>, <@3>"));
+        assert!(status.contains("Ready: 3/3"));
+    }
+
+    #[test]
+    fn dm_status_reports_requester_submission_state() {
+        let mut game = game_with_players(2);
+        game.start(1).unwrap();
+        game.submit_text(1, "tiny castle".to_owned()).unwrap();
+
+        let submitted_status = format_dm_status(&game, 1);
+        let waiting_status = format_dm_status(&game, 2);
+
+        assert!(submitted_status.contains("You have submitted this round."));
+        assert!(waiting_status.contains("You have not submitted this round yet."));
+    }
+
+    #[test]
+    fn drawing_assignment_omits_prompt_author() {
+        let assignment = RoundAssignment {
+            player_id: 2,
+            chain_index: 0,
+            previous_entry: Some(ChainEntry {
+                author_id: 1,
+                kind: SubmissionKind::Prompt("tiny castle".to_owned()),
+            }),
+            round_kind: RoundKind::Drawing,
+        };
+
+        let content = assignment_message_content(&assignment, true, 1024, 1024);
+
+        assert!(content.contains("tiny castle"));
+        assert!(!content.contains("<@1>"));
+        assert!(!content.contains("wrote"));
+    }
+
+    #[tokio::test]
+    async fn lobby_button_toggles_membership() {
+        let data = Data::default();
+        insert_game(&data, game_with_players(1)).await;
+
+        let joined = toggle_lobby_membership(&data, test_key(), 2).await.unwrap();
+        assert!(joined.contains("joined"));
+
+        let left = toggle_lobby_membership(&data, test_key(), 2).await.unwrap();
+        assert!(left.contains("left"));
+
+        let games = data.grateic.games.read().await;
+        let game = games.get(&test_key()).unwrap();
+        assert_eq!(game.players, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn normal_cancel_is_lobby_only_and_force_cancel_handles_started_game() {
+        let data = Data::default();
+        let mut game = game_with_players(2);
+        game.start(1).unwrap();
+        insert_game(&data, game).await;
+
+        let error = cancel_game(&data, test_key(), 1).await.unwrap_err();
+        assert!(error.to_string().contains("already started"));
+
+        force_cancel_game(&data, test_key(), 1).await.unwrap();
+        assert!(data.grateic.games.read().await.get(&test_key()).is_none());
     }
 }

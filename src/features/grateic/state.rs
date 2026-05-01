@@ -113,6 +113,7 @@ pub struct RoundAssignment {
 pub struct Game {
     pub key: GameKey,
     pub host_id: u64,
+    pub lobby_message_id: Option<u64>,
     pub canvas: CanvasConfig,
     pub phase: GamePhase,
     pub players: Vec<u64>,
@@ -133,13 +134,15 @@ pub enum GameError {
     GameNotFound,
     #[error("only the host can do that")]
     NotHost,
+    #[error("the host cannot leave the lobby; cancel the game instead")]
+    HostCannotLeave,
     #[error("the game has already started")]
     AlreadyStarted,
     #[error("the game is not accepting submissions")]
     NotInProgress,
     #[error("you are already in this game")]
     AlreadyJoined,
-    #[error("you are already in another active Grateic game")]
+    #[error("you are already in another active Grateic Phone game")]
     AlreadyInAnotherGame,
     #[error("you are not in this game")]
     NotAPlayer,
@@ -159,6 +162,8 @@ pub enum GameError {
     RoundNotComplete,
     #[error("the requested round transition is stale")]
     StaleRoundTransition,
+    #[error("text submissions must be 140 characters or fewer")]
+    TextTooLong,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +211,7 @@ impl Game {
         Self {
             key,
             host_id,
+            lobby_message_id: None,
             canvas,
             phase: GamePhase::Lobby,
             players: vec![host_id],
@@ -228,6 +234,29 @@ impl Game {
 
         self.players.push(player_id);
         self.mark_ready(player_id)?;
+        Ok(())
+    }
+
+    pub fn set_lobby_message_id(&mut self, message_id: u64) {
+        self.lobby_message_id = Some(message_id);
+    }
+
+    pub fn leave(&mut self, player_id: u64) -> Result<(), GameError> {
+        if self.phase != GamePhase::Lobby {
+            return Err(GameError::AlreadyStarted);
+        }
+
+        if player_id == self.host_id {
+            return Err(GameError::HostCannotLeave);
+        }
+
+        let Some(player_index) = self.players.iter().position(|id| *id == player_id) else {
+            return Err(GameError::NotAPlayer);
+        };
+
+        self.players.remove(player_index);
+        self.unready_players.remove(&player_id);
+        self.submitted_this_round.remove(&player_id);
         Ok(())
     }
 
@@ -307,11 +336,26 @@ impl Game {
             return Err(GameError::NotHost);
         }
 
+        if self.phase != GamePhase::Lobby {
+            return Err(GameError::AlreadyStarted);
+        }
+
+        self.phase = GamePhase::Cancelled;
+        Ok(())
+    }
+
+    pub fn force_cancel(&mut self, requester_id: u64) -> Result<(), GameError> {
+        if requester_id != self.host_id {
+            return Err(GameError::NotHost);
+        }
+
         self.phase = GamePhase::Cancelled;
         Ok(())
     }
 
     pub fn submit_text(&mut self, player_id: u64, text: String) -> Result<Advance, GameError> {
+        let text = validate_text_submission(text)?;
+
         if matches!(self.mode, GameMode::Short { .. }) {
             return self.submit_short_prompt(player_id, text);
         }
@@ -321,8 +365,8 @@ impl Game {
         }
 
         let kind = match self.round_kind() {
-            RoundKind::Prompt => SubmissionKind::Prompt(text.trim().to_owned()),
-            RoundKind::Naming => SubmissionKind::Name(text.trim().to_owned()),
+            RoundKind::Prompt => SubmissionKind::Prompt(text),
+            RoundKind::Naming => SubmissionKind::Name(text),
             RoundKind::Drawing => return Err(GameError::ExpectedDrawing),
         };
 
@@ -461,6 +505,10 @@ impl Game {
         self.submitted_this_round.len()
     }
 
+    pub fn has_submitted(&self, player_id: u64) -> bool {
+        self.submitted_this_round.contains(&player_id)
+    }
+
     pub fn ready_count(&self) -> usize {
         self.players.len() - self.unready_players.len()
     }
@@ -547,7 +595,7 @@ impl Game {
 
         prompts.push(ShortPrompt {
             author_id: player_id,
-            text: text.trim().to_owned(),
+            text,
         });
         self.submitted_this_round.insert(player_id);
 
@@ -674,6 +722,15 @@ impl Game {
         self.chains.clear();
         self.submitted_this_round.clear();
     }
+}
+
+fn validate_text_submission(text: String) -> Result<String, GameError> {
+    let text = text.trim().to_owned();
+    if text.chars().count() > 140 {
+        return Err(GameError::TextTooLong);
+    }
+
+    Ok(text)
 }
 
 #[cfg(test)]
@@ -993,6 +1050,77 @@ mod tests {
         game.mark_ready(2).unwrap();
         assert!(game.unready_players().is_empty());
         assert!(game.start(1).is_ok());
+    }
+
+    #[test]
+    fn non_host_can_leave_lobby() {
+        let mut game = game_with_players(3);
+
+        game.leave(2).unwrap();
+
+        assert_eq!(game.players, vec![1, 3]);
+        assert!(!game.has_player(2));
+    }
+
+    #[test]
+    fn host_cannot_leave_lobby() {
+        let mut game = game_with_players(2);
+
+        assert_eq!(game.leave(1), Err(GameError::HostCannotLeave));
+        assert_eq!(game.players, vec![1, 2]);
+    }
+
+    #[test]
+    fn leave_is_rejected_after_start() {
+        let mut game = game_with_players(2);
+        game.start(1).unwrap();
+
+        assert_eq!(game.leave(2), Err(GameError::AlreadyStarted));
+    }
+
+    #[test]
+    fn normal_cancel_is_lobby_only_but_force_cancel_can_end_started_game() {
+        let mut game = game_with_players(2);
+
+        game.cancel(1).unwrap();
+        assert_eq!(game.phase, GamePhase::Cancelled);
+
+        let mut game = game_with_players(2);
+        game.start(1).unwrap();
+
+        assert_eq!(game.cancel(1), Err(GameError::AlreadyStarted));
+        game.force_cancel(1).unwrap();
+        assert_eq!(game.phase, GamePhase::Cancelled);
+    }
+
+    #[test]
+    fn leave_removes_readiness_tracking() {
+        let mut game = game_with_players(3);
+        game.mark_not_ready(2);
+
+        game.leave(2).unwrap();
+
+        assert_eq!(game.players, vec![1, 3]);
+        assert_eq!(game.unready_players(), Vec::<u64>::new());
+        assert_eq!(game.ready_count(), 2);
+    }
+
+    #[test]
+    fn text_submissions_are_trimmed_and_capped_at_140_characters() {
+        let mut game = game_with_players(2);
+        game.start(1).unwrap();
+
+        let accepted = format!("  {}  ", "a".repeat(140));
+        assert_eq!(game.submit_text(1, accepted).unwrap(), Advance::Waiting);
+        assert_eq!(
+            game.chains[0].entries[0].kind,
+            SubmissionKind::Prompt("a".repeat(140))
+        );
+
+        assert_eq!(
+            game.submit_text(2, "b".repeat(141)),
+            Err(GameError::TextTooLong)
+        );
     }
 
     #[test]
