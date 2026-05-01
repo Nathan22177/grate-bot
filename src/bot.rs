@@ -111,16 +111,16 @@ fn help_message() -> String {
     "Grate Boss help\n\
 \n\
 Broadly, I can help with:\n\
-    - Grateic: host a Discord drawing-and-prompt game. Create a short or full lobby, let players join, start rounds, collect text and drawing submissions in DMs, track status, cancel a lobby, and reveal the finished game.\n\
+    - Grateic Phone: host a Discord drawing-and-prompt game. Create a short or full lobby, let players join, start rounds, collect text and drawing submissions in DMs, track status, cancel a lobby, and reveal the finished game.\n\
 - Build verification: show the running bot version, source ref, commit, build input state, and executable SHA-256 so you can compare the live bot against a release.\n\
 \n\
 Useful commands:\n\
-	- `/grate create` starts a Grateic lobby with mode, canvas size, background, and canvas-size-rule options.\n\
-	- `/grate grateic help`, `/grate grateic join`, `/grate grateic ready`, `/grate grateic start`, `/grate grateic status`, and `/grate grateic cancel` explain or manage a Grateic game.\n\
+	- `/grate create` starts a Grateic Phone lobby with mode, canvas size, background, and canvas-size-rule options.\n\
+	- `/grate grateic help`, `/grate grateic join`, `/grate grateic ready`, `/grate grateic start`, `/grate grateic status`, `/grate grateic cancel`, and `/grate grateic force_cancel` explain or manage a Grateic Phone game.\n\
 - `/grate verify` reports what build is currently running.\n\
 - `/grate hytale help`, `/grate hytale status`, `/grate hytale logs`, `/grate hytale start`, `/grate hytale stop`, `/grate hytale restart`, and `/grate hytale update` manage the Hytale server for members with the configured manager role.\n\
 \n\
-Notes: Grateic game state is kept in memory, so active games reset if I restart."
+Notes: Grateic Phone game state is kept in memory, so active games reset if I restart."
         .to_owned()
 }
 
@@ -132,7 +132,7 @@ mod tests {
     fn help_message_mentions_major_features_and_commands() {
         let message = help_message();
 
-        assert!(message.contains("Grateic"));
+        assert!(message.contains("Grateic Phone"));
         assert!(message.contains("Build verification"));
         assert!(message.contains("/grate verify"));
 

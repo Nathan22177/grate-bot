@@ -1,11 +1,10 @@
 # grate-bot
 
-Discord bot for Grate server utilities:
+Discord bot for Grate server tools:
 
-- Build verification for the running bot binary
-- Help and command discovery
-- Grateic drawing-and-prompt games
-- Hytale server management for trusted helpers
+- Host Grateic Phone, a drawing-and-prompt game
+- Manage the Hytale server with trusted helpers
+- Verify the running bot build
 
 ## Commands
 
@@ -18,19 +17,20 @@ Discord bot for Grate server utilities:
 
 Use `/grate verify` to compare the running binary against a published release artifact.
 
-### Grateic
+### Grateic Phone
 
 | Command | Purpose |
 | --- | --- |
-| `/grate create` | Create a Grateic lobby. |
-| `/grate grateic help` | Explain Grateic commands, settings, modes, and examples. |
-| `/grate grateic join` | Join the active Grateic lobby in this server. |
+| `/grate create` | Create a Grateic Phone lobby. |
+| `/grate grateic help` | Explain Grateic Phone commands, settings, modes, and examples. |
+| `/grate grateic join` | Join the active Grateic Phone lobby in this server. |
 | `/grate grateic ready` | Retry the DM readiness check after fixing DMs. |
 | `/grate grateic start` | Start the active lobby. Host only. |
-| `/grate grateic status` | Show players, mode, round, readiness, canvas, and waiting count. |
-| `/grate grateic cancel` | Cancel the active lobby. Host only. |
+| `/grate grateic status` | Refresh lobby status before start, or privately show in-progress round status. |
+| `/grate grateic cancel` | Cancel the active lobby before it starts. Host only. |
+| `/grate grateic force_cancel` | Force-cancel a stuck active game. Host only. |
 
-Full Grateic rules, setup options, modes, canvas settings, and validation details live in [docs/GRATEIC.md](docs/GRATEIC.md).
+Full Grateic Phone rules, setup options, modes, canvas settings, and validation details live in [docs/GRATEIC.md](docs/GRATEIC.md).
 
 ### Hytale
 

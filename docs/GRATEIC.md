@@ -1,18 +1,19 @@
-# Grateic
+# Grateic Phone
 
-Grateic is a Discord drawing-and-prompt game. Players join from a server channel, receive assignments in DMs, submit prompts and drawings, and reveal the finished chains back in the original channel.
+Grateic Phone is a Discord drawing-and-prompt game. Players join from a server channel, receive assignments in DMs, submit prompts and drawings, and reveal the finished chains back in the original channel.
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `/grate create` | Create a Grateic lobby. |
-| `/grate grateic help` | Explain Grateic commands, settings, modes, and examples. |
-| `/grate grateic join` | Join the active Grateic lobby in this server. |
+| `/grate create` | Create a Grateic Phone lobby. |
+| `/grate grateic help` | Explain Grateic Phone commands, settings, modes, and examples. |
+| `/grate grateic join` | Join the active Grateic Phone lobby in this server. |
 | `/grate grateic ready` | Retry the DM readiness check after fixing DMs. |
 | `/grate grateic start` | Start the active lobby. Host only. |
-| `/grate grateic status` | Show players, mode, round, readiness, canvas, and waiting count. |
-| `/grate grateic cancel` | Cancel the active lobby. Host only. |
+| `/grate grateic status` | Refresh lobby status before start, or privately show in-progress round status. |
+| `/grate grateic cancel` | Cancel the active lobby before it starts. Host only. |
+| `/grate grateic force_cancel` | Force-cancel a stuck active game. Host only. |
 
 Create a lobby with:
 
@@ -50,11 +51,11 @@ Background choices:
 
 ## Rules
 
-Grateic is played in Discord DMs after players join from a server channel. Games are stored in memory, reset when the bot restarts, and are limited to one active Grateic game per server. A Discord user can only be enrolled in one active Grateic game across the bot.
+Grateic Phone is played in Discord DMs after players join from a server channel. Games are stored in memory, reset when the bot restarts, and are limited to one active Grateic Phone game per server. A Discord user can only be enrolled in one active Grateic Phone game across the bot.
 
 Players are treated as ready when they join. If the bot cannot DM someone when the host starts the game, it rolls the game back to the lobby and marks that player unready. After they enable DMs from the server, they can run `/grate grateic ready`; then the host can run `/grate grateic start` again.
 
-Lobby and status messages include `Join`, `Status`, and `Start` buttons. DM assignment messages include a `Status` button for checking the game without returning to the server channel. Reveals are posted in the channel where `/grate create` was run.
+The original lobby message is continuously updated with lobby status, joined players, readiness, canvas settings, and start requirements. Lobby controls include `Join / Leave`, `Status`, `Start`, and `Cancel`; `Start` and `Cancel` remain host-only. DM assignment messages include a `Status` button for checking in-progress round completion without returning to the server channel. Reveals are posted in the channel where `/grate create` was run.
 
 ## Short Mode
 
@@ -104,6 +105,8 @@ The bot rejects:
 - Submissions from non-players
 - Text when an image is required
 - Image-less messages when a drawing is required
+- Text submissions longer than 140 characters
+- Discord stickers used as text prompts
 - Wrong-size drawings when `require_canvas_size` is enabled
 - Invalid custom hex colors
 - Submissions after the game has ended
