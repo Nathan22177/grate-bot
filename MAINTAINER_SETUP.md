@@ -164,7 +164,7 @@ For manual setup or review, the scripts use `sudo -n`, so the bot's host user ne
 ```sudoers
 BOT_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start hytale-server.service, /usr/bin/systemctl stop hytale-server.service, /usr/bin/systemctl restart hytale-server.service
 BOT_USER ALL=(root) NOPASSWD: /usr/bin/systemctl status hytale-server.service --no-pager
-BOT_USER ALL=(root) NOPASSWD: /usr/bin/apt, /usr/bin/dpkg, /usr/bin/tee, /usr/bin/test
+BOT_USER ALL=(root) NOPASSWD: /usr/bin/apt, /usr/bin/apt-get, /usr/bin/dpkg, /usr/bin/tee, /usr/bin/test
 ```
 
 Install sudoers entries with `visudo`, for example `sudo visudo -f /etc/sudoers.d/grate-bot-hytale`, and make sure the service name matches `HYTALE_SERVICE_NAME`. Verify the bot user can run the needed commands without an interactive password prompt:
