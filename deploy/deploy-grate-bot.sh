@@ -17,6 +17,7 @@ HYTALE_DIR="${HYTALE_DIR:-}"
 BACKUP_DIR="${BACKUP_DIR:-}"
 HYTALE_SERVICE_NAME="${HYTALE_SERVICE_NAME:-}"
 HYTALE_SUDOERS_FILE="${HYTALE_SUDOERS_FILE:-/etc/sudoers.d/grate-bot-hytale}"
+RELEASE_ARCHIVE="${RELEASE_ARCHIVE:-}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 SKIP_SERVICE_FILE="${SKIP_SERVICE_FILE:-0}"
@@ -282,6 +283,7 @@ Environment overrides:
   BACKUP_DIR                   default: the deploy user's ~/hytale-backups
   HYTALE_SERVICE_NAME          default: hytale-server.service
   HYTALE_SUDOERS_FILE          default: /etc/sudoers.d/grate-bot-hytale
+  RELEASE_ARCHIVE              install the binary and deploy scripts from this release tarball
   SKIP_GIT_PULL=1              do not git checkout/pull
   SKIP_BUILD=1                 do not run cargo build --release
   SKIP_SERVICE_FILE=1          do not install or enable the systemd service file
@@ -306,6 +308,9 @@ need_cmd git
 need_cmd install
 need_cmd sudo
 need_cmd systemctl
+if [[ -n "$RELEASE_ARCHIVE" ]]; then
+  need_cmd tar
+fi
 if [[ "$SKIP_HYTALE_SCRIPT_CONFIG" != "1" ]]; then
   need_cmd getent
 fi
@@ -315,6 +320,31 @@ fi
 
 if [[ ! -f Cargo.toml ]]; then
   fail "run this script from the grate-bot repository root"
+fi
+
+artifact_root=""
+artifact_tmp=""
+artifact_binary="target/release/$BIN_NAME"
+artifact_deploy_dir=""
+if [[ -n "$RELEASE_ARCHIVE" ]]; then
+  [[ "$RELEASE_ARCHIVE" == /* ]] || fail "RELEASE_ARCHIVE must be an absolute path: $RELEASE_ARCHIVE"
+  [[ -f "$RELEASE_ARCHIVE" ]] || fail "RELEASE_ARCHIVE does not exist: $RELEASE_ARCHIVE"
+
+  artifact_tmp="$(mktemp -d)"
+  cleanup_artifact_tmp() {
+    rm -rf "$artifact_tmp"
+  }
+  trap cleanup_artifact_tmp EXIT
+
+  log "Extracting release archive $RELEASE_ARCHIVE"
+  tar -xzf "$RELEASE_ARCHIVE" -C "$artifact_tmp"
+  artifact_root="$(find "$artifact_tmp" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  [[ -n "$artifact_root" ]] || fail "release archive did not contain a top-level release directory"
+  artifact_binary="$artifact_root/$BIN_NAME"
+  artifact_deploy_dir="$artifact_root/deploy"
+  [[ -x "$artifact_binary" ]] || fail "release archive does not contain an executable $BIN_NAME"
+  [[ -d "$artifact_deploy_dir" ]] || fail "release archive does not contain deploy scripts"
+  SKIP_BUILD=1
 fi
 
 if [[ -z "$BRANCH" ]]; then
@@ -338,8 +368,24 @@ else
   log "Skipping build"
 fi
 
-if [[ ! -x "target/release/$BIN_NAME" ]]; then
-  fail "release binary target/release/$BIN_NAME does not exist or is not executable"
+if [[ ! -x "$artifact_binary" ]]; then
+  fail "release binary $artifact_binary does not exist or is not executable"
+fi
+
+if [[ -n "$artifact_deploy_dir" ]]; then
+  log "Installing release deploy scripts to $INSTALL_DIR/deploy"
+  sudo install -d -o "$BOT_USER" -g "$BOT_GROUP" -m 0755 "$INSTALL_DIR"
+  sudo rm -rf "$INSTALL_DIR/deploy"
+  sudo cp -R "$artifact_deploy_dir" "$INSTALL_DIR/deploy"
+  sudo chown -R "$BOT_USER:$BOT_GROUP" "$INSTALL_DIR/deploy"
+  sudo find "$INSTALL_DIR/deploy" -type d -exec chmod 0755 {} +
+  sudo find "$INSTALL_DIR/deploy" -type f -exec chmod 0755 {} +
+  if [[ -z "$HYTALE_MANAGE_SCRIPT" ]]; then
+    HYTALE_MANAGE_SCRIPT="$INSTALL_DIR/deploy/hytale-manage.sh"
+  fi
+  if [[ -z "$HYTALE_DOWNLOADER_UPDATE_SCRIPT" ]]; then
+    HYTALE_DOWNLOADER_UPDATE_SCRIPT="$INSTALL_DIR/deploy/hytale-downloader-update.sh"
+  fi
 fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -505,7 +551,7 @@ sudo systemctl stop "$SERVICE_NAME" || true
 log "Installing bot binary to $INSTALL_DIR/$BIN_NAME"
 sudo install -d -o "$BOT_USER" -g "$BOT_GROUP" -m 0755 "$INSTALL_DIR"
 sudo install -o "$BOT_USER" -g "$BOT_GROUP" -m 0755 \
-  "target/release/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
+  "$artifact_binary" "$INSTALL_DIR/$BIN_NAME"
 
 
 log "Starting $SERVICE_NAME"
@@ -516,5 +562,9 @@ sudo systemctl status "$SERVICE_NAME" --no-pager
 
 log "Recent logs"
 sudo journalctl -u "$SERVICE_NAME" -n 80 --no-pager
+
+if [[ -n "$artifact_tmp" ]]; then
+  rm -rf "$artifact_tmp"
+fi
 
 log "Deployment complete"

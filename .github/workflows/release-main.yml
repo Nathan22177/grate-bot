@@ -1,4 +1,4 @@
-name: Release main
+name: Release main and deploy
 
 on:
   workflow_dispatch:
@@ -11,14 +11,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test-publish:
-    name: test-publish
+  preflight:
+    name: Preflight release checks
     runs-on: ubuntu-latest
-    outputs:
-      artifact: ${{ steps.package.outputs.artifact }}
-      sha: ${{ steps.package.outputs.sha }}
-      tag: ${{ steps.package.outputs.tag }}
-      version: ${{ steps.package.outputs.version }}
 
     steps:
       - name: Check out main
@@ -32,27 +27,109 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Read package version
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Check project
+        run: cargo check --locked
+
+      - name: Check optional features
+        run: cargo check --locked --all-features
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Run tests with optional features
+        run: cargo test --locked --all-features
+
+  bump-version:
+    name: Bump release version
+    runs-on: ubuntu-latest
+    needs: preflight
+    outputs:
+      artifact: ${{ steps.package.outputs.artifact }}
+      checksum: ${{ steps.package.outputs.checksum }}
+      sha: ${{ steps.package.outputs.sha }}
+      tag: ${{ steps.package.outputs.tag }}
+      version: ${{ steps.package.outputs.version }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Bump minor package version
         id: package
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
-          sha="$(git rev-parse HEAD)"
+          current="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "grate-bot") | .version')"
+          IFS=. read -r major minor patch_extra <<< "${current}"
+          patch="${patch_extra%%[-+]*}"
+          if [[ -z "${major}" || -z "${minor}" || -z "${patch}" || ! "${major}" =~ ^[0-9]+$ || ! "${minor}" =~ ^[0-9]+$ || ! "${patch}" =~ ^[0-9]+$ ]]; then
+            echo "::error::Unsupported package version: ${current}"
+            exit 1
+          fi
+
+          version="${major}.$((minor + 1)).0"
           tag="v${version}"
           artifact="grate-bot-${tag}-x86_64-unknown-linux-gnu.tar.gz"
+          checksum="grate-bot-${tag}-x86_64-unknown-linux-gnu.sha256"
+
+          if gh release view "${tag}" >/dev/null 2>&1 || git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "::error::Release ${tag} already exists."
+            exit 1
+          fi
+
+          export CURRENT_VERSION="${current}"
+          export NEW_VERSION="${version}"
+          perl -0pi -e 's/(^\[package\]\nname = "grate-bot"\nversion = ")\Q$ENV{CURRENT_VERSION}\E(")/$1$ENV{NEW_VERSION}$2/m' Cargo.toml
+          cargo update --workspace
+
+          git diff --exit-code -- Cargo.toml Cargo.lock && {
+            echo "::error::Version bump did not change Cargo.toml or Cargo.lock"
+            exit 1
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: release ${tag}"
+          git push origin HEAD:main
+
+          sha="$(git rev-parse HEAD)"
           echo "artifact=${artifact}" >> "${GITHUB_OUTPUT}"
+          echo "checksum=${checksum}" >> "${GITHUB_OUTPUT}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
           echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
 
-      - name: Verify release tag is unused
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.package.outputs.tag }}
-        run: |
-          if gh release view "${TAG}" >/dev/null 2>&1 || git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "::error::Release ${TAG} already exists. Bump Cargo.toml version before releasing again."
-            exit 1
-          fi
+  test-publish:
+    name: test-publish
+    runs-on: ubuntu-latest
+    needs: bump-version
+    outputs:
+      artifact: ${{ needs.bump-version.outputs.artifact }}
+      checksum: ${{ needs.bump-version.outputs.checksum }}
+      sha: ${{ needs.bump-version.outputs.sha }}
+      tag: ${{ needs.bump-version.outputs.tag }}
+      version: ${{ needs.bump-version.outputs.version }}
+
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.sha }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
         run: cargo fmt --check
@@ -70,12 +147,18 @@ jobs:
         run: cargo test --locked --all-features
 
       - name: Build release binary
+        env:
+          BUILD_COMMIT: ${{ needs.bump-version.outputs.sha }}
+          BUILD_RELEASE_TAG: ${{ needs.bump-version.outputs.tag }}
+          BUILD_REPOSITORY: ${{ github.repository }}
+          BUILD_SOURCE_REF: main
         run: cargo build --locked --release --bin grate-bot
 
       - name: Package release artifact
         env:
-          ARTIFACT: ${{ steps.package.outputs.artifact }}
-          TAG: ${{ steps.package.outputs.tag }}
+          ARTIFACT: ${{ needs.bump-version.outputs.artifact }}
+          CHECKSUM: ${{ needs.bump-version.outputs.checksum }}
+          TAG: ${{ needs.bump-version.outputs.tag }}
         run: |
           mkdir -p "dist/${TAG}"
           cp target/release/grate-bot "dist/${TAG}/grate-bot"
@@ -83,13 +166,16 @@ jobs:
           cp MAINTAINER_SETUP.md "dist/${TAG}/MAINTAINER_SETUP.md"
           cp .env.example "dist/${TAG}/.env.example"
           cp -R deploy "dist/${TAG}/deploy"
+          (cd "dist/${TAG}" && sha256sum grate-bot) > "dist/${CHECKSUM}"
           tar -C dist -czf "dist/${ARTIFACT}" "${TAG}"
 
       - name: Upload test-publish artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.package.outputs.artifact }}
-          path: dist/${{ steps.package.outputs.artifact }}
+          name: ${{ needs.bump-version.outputs.artifact }}
+          path: |
+            dist/${{ needs.bump-version.outputs.artifact }}
+            dist/${{ needs.bump-version.outputs.checksum }}
           if-no-files-found: error
 
   release:
@@ -113,6 +199,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT: ${{ needs.test-publish.outputs.artifact }}
+          CHECKSUM: ${{ needs.test-publish.outputs.checksum }}
           TAG: ${{ needs.test-publish.outputs.tag }}
           SHA: ${{ needs.test-publish.outputs.sha }}
           VERSION: ${{ needs.test-publish.outputs.version }}
@@ -121,6 +208,67 @@ jobs:
           git push origin "${TAG}"
           gh release create "${TAG}" \
             "dist/${ARTIFACT}" \
+            "dist/${CHECKSUM}" \
             --target "${SHA}" \
             --title "grate-bot ${VERSION}" \
             --generate-notes
+
+  deploy:
+    name: Deploy main to Linux server
+    runs-on: ubuntu-latest
+    needs:
+      - test-publish
+      - release
+    environment: production
+
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.test-publish.outputs.artifact }}
+          path: dist
+
+      - name: Configure SSH
+        env:
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          test -n "${DEPLOY_SSH_KEY}" || { echo "::error::DEPLOY_SSH_KEY secret is required"; exit 1; }
+          test -n "${DEPLOY_KNOWN_HOSTS}" || { echo "::error::DEPLOY_KNOWN_HOSTS secret is required"; exit 1; }
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > ~/.ssh/deploy_key
+          printf '%s\n' "${DEPLOY_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Upload release archive
+        env:
+          ARTIFACT: ${{ needs.test-publish.outputs.artifact }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          test -n "${DEPLOY_HOST}" || { echo "::error::DEPLOY_HOST secret is required"; exit 1; }
+          test -n "${DEPLOY_USER}" || { echo "::error::DEPLOY_USER secret is required"; exit 1; }
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
+          scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT}" "dist/${ARTIFACT}" "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/${ARTIFACT}"
+
+      - name: Deploy main
+        env:
+          ARTIFACT: ${{ needs.test-publish.outputs.artifact }}
+          DEPLOY_BRANCH: main
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_REPO_DIR: ${{ vars.DEPLOY_REPO_DIR }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          test -n "${DEPLOY_HOST}" || { echo "::error::DEPLOY_HOST secret is required"; exit 1; }
+          test -n "${DEPLOY_USER}" || { echo "::error::DEPLOY_USER secret is required"; exit 1; }
+          test -n "${DEPLOY_REPO_DIR}" || { echo "::error::DEPLOY_REPO_DIR repository variable is required"; exit 1; }
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
+          remote_dir="$(printf '%q' "${DEPLOY_REPO_DIR}")"
+          remote_branch="$(printf '%q' "${DEPLOY_BRANCH}")"
+          remote_archive="$(printf '%q' "/tmp/${ARTIFACT}")"
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "cd ${remote_dir} && BRANCH=${remote_branch} RELEASE_ARCHIVE=${remote_archive} deploy/deploy-grate-bot.sh"

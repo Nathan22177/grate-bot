@@ -16,6 +16,8 @@ fn main() {
 
     set_build_env("BUILD_SOURCE_REF", source_ref());
     set_build_env("BUILD_COMMIT", build_commit());
+    set_build_env("BUILD_REPOSITORY", build_repository());
+    set_build_env("BUILD_RELEASE_TAG", build_release_tag());
     println!("cargo:rustc-env=BUILD_INPUT_STATE={}", build_input_state());
 }
 
@@ -36,6 +38,16 @@ fn build_commit() -> String {
         .or_else(|| env_value("GITHUB_SHA"))
         .or_else(|| git_output(&["rev-parse", "HEAD"]))
         .unwrap_or_else(|| "unknown".to_owned())
+}
+
+fn build_repository() -> String {
+    env_value("BUILD_REPOSITORY")
+        .or_else(|| env_value("GITHUB_REPOSITORY"))
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+fn build_release_tag() -> String {
+    env_value("BUILD_RELEASE_TAG").unwrap_or_else(|| "unknown".to_owned())
 }
 
 fn env_value(key: &str) -> Option<String> {

@@ -12,10 +12,10 @@ Discord bot for Grate server tools:
 
 | Command | Purpose |
 | --- | --- |
-| `/grate verify` | Report the running bot version, source ref, build commit, build input state, and executable SHA-256 checksum. |
+| `/grate verify` | Report whether the bot is running an official release, plus version, source ref, build commit, build input state, executable SHA-256 checksum, and official release checksum link. |
 | `/grate help` | Show the top-level command summary. |
 
-Use `/grate verify` to compare the running binary against a published release artifact.
+Use `/grate verify` to compare the running executable SHA-256 against the checksum asset attached to the official GitHub release.
 
 ### Grateic Phone
 
