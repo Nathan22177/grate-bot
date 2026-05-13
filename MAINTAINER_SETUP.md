@@ -105,6 +105,35 @@ sudo journalctl -u grate-bot.service -n 100 --no-pager
 sudo systemctl restart grate-bot.service
 ```
 
+## GitHub Actions Deploy
+
+The repository has two manual GitHub Actions deploy flows:
+
+- `Release main and deploy`: runs release checks on `main`, increments the middle package version, publishes the GitHub release from that new commit, then deploys the exact released binary to the Linux server.
+- `Deploy branch`: deploys a selected branch, useful for testing a PR branch on the server.
+
+Both workflows SSH into the server and run the checked-out repository's `deploy/deploy-grate-bot.sh` with `BRANCH` set explicitly. Configure these repository secrets:
+
+```sh
+DEPLOY_HOST=server hostname or IP
+DEPLOY_USER=ssh user
+DEPLOY_SSH_KEY=private SSH key for DEPLOY_USER
+DEPLOY_KNOWN_HOSTS=known_hosts entry for the server
+DEPLOY_PORT=22
+```
+
+Configure this repository variable:
+
+```sh
+DEPLOY_REPO_DIR=/path/to/grate-bot/repository/on/server
+```
+
+`DEPLOY_PORT` is optional and defaults to `22`. The SSH user must be able to `cd` into `DEPLOY_REPO_DIR`, pull the selected branch, build with Cargo, and run the same `sudo systemctl` and install commands used by `deploy/deploy-grate-bot.sh`.
+
+The release workflow bumps the package version from `major.minor.patch` to `major.(minor + 1).0`; for example, `0.1.4` becomes `0.2.0`.
+
+The release workflow also uploads `grate-bot-vX.Y.Z-x86_64-unknown-linux-gnu.sha256`, which contains the SHA-256 checksum of the released executable inside the release archive. `/grate verify` reports the running executable SHA-256 and links to that checksum asset, so users can verify the live bot is running the official GitHub release binary.
+
 ## Hytale Management Setup
 
 The Hytale commands assume the bot runs on the same Ubuntu host as the Hytale dedicated server. The bot calls `hytale-manage.sh` for every Hytale action, and the script manages the service through `systemd` as `hytale-server.service` by default. See [docs/HYTALE.md](docs/HYTALE.md) for the full feature explanation.

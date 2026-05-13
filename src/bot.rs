@@ -83,16 +83,53 @@ async fn verify(ctx: Context<'_>) -> Result<(), Error> {
         .with_context(|| format!("could not checksum {}", exe_path.display()))?;
 
     ctx.say(format!(
-        "Build verification\nVersion: `{}`\nSource ref: `{}`\nCommit: `{}`\nBuild inputs: `{}`\nExecutable SHA-256: `{}`",
+        "Build verification\nRelease status: {}\nVersion: `{}`\nSource ref: `{}`\nCommit: `{}`\nBuild inputs: `{}`\nExecutable SHA-256: `{}`\nRelease: {}\nRelease checksum: {}",
+        release_status(),
         env!("CARGO_PKG_VERSION"),
         option_env!("BUILD_SOURCE_REF").unwrap_or("unknown"),
         option_env!("BUILD_COMMIT").unwrap_or("unknown"),
         option_env!("BUILD_INPUT_STATE").unwrap_or("unknown"),
-        checksum
+        checksum,
+        release_url(),
+        release_checksum_url()
     ))
     .await?;
 
     Ok(())
+}
+
+fn release_status() -> &'static str {
+    let tag = option_env!("BUILD_RELEASE_TAG").unwrap_or("unknown");
+
+    if tag == "unknown" {
+        "⚠️ branch or local build"
+    } else {
+        "✅ official GitHub release"
+    }
+}
+
+fn release_url() -> String {
+    let repository = option_env!("BUILD_REPOSITORY").unwrap_or("unknown");
+    let tag = option_env!("BUILD_RELEASE_TAG").unwrap_or("unknown");
+
+    if repository == "unknown" || tag == "unknown" {
+        "`unknown`".to_owned()
+    } else {
+        format!("https://github.com/{repository}/releases/tag/{tag}")
+    }
+}
+
+fn release_checksum_url() -> String {
+    let repository = option_env!("BUILD_REPOSITORY").unwrap_or("unknown");
+    let tag = option_env!("BUILD_RELEASE_TAG").unwrap_or("unknown");
+
+    if repository == "unknown" || tag == "unknown" {
+        "`unknown`".to_owned()
+    } else {
+        format!(
+            "https://github.com/{repository}/releases/download/{tag}/grate-bot-{tag}-x86_64-unknown-linux-gnu.sha256"
+        )
+    }
 }
 
 fn sha256_file(path: &Path) -> anyhow::Result<String> {

@@ -47,6 +47,7 @@ jobs:
           test -n "${DEPLOY_BRANCH}" || { echo "::error::No branch was selected"; exit 1; }
           test -n "${DEPLOY_HOST}" || { echo "::error::DEPLOY_HOST secret is required"; exit 1; }
           test -n "${DEPLOY_USER}" || { echo "::error::DEPLOY_USER secret is required"; exit 1; }
+          DEPLOY_REPO_DIR="$(printf '%s' "${DEPLOY_REPO_DIR}" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
           test -n "${DEPLOY_REPO_DIR}" || { echo "::error::DEPLOY_REPO_DIR repository variable is required"; exit 1; }
           DEPLOY_PORT="${DEPLOY_PORT:-22}"
           remote_dir="$(printf '%q' "${DEPLOY_REPO_DIR}")"
