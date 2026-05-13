@@ -118,7 +118,7 @@ Useful commands:\n\
 	- `/grate create` starts a Grateic Phone lobby with mode, canvas size, background, and canvas-size-rule options.\n\
 	- `/grate grateic help`, `/grate grateic join`, `/grate grateic ready`, `/grate grateic start`, `/grate grateic status`, `/grate grateic cancel`, and `/grate grateic force_cancel` explain or manage a Grateic Phone game.\n\
 - `/grate verify` reports what build is currently running.\n\
-- `/grate hytale help`, `/grate hytale status`, `/grate hytale logs`, `/grate hytale start`, `/grate hytale stop`, `/grate hytale restart`, and `/grate hytale update` manage the Hytale server for members with the configured manager role.\n\
+- `/grate hytale help`, `/grate hytale status`, `/grate hytale logs`, `/grate hytale start`, `/grate hytale stop`, `/grate hytale restart`, `/grate hytale check-update`, and `/grate hytale update` manage the Hytale server for members with the configured manager role.\n\
 \n\
 Notes: Grateic Phone game state is kept in memory, so active games reset if I restart."
         .to_owned()
@@ -137,6 +137,7 @@ mod tests {
         assert!(message.contains("/grate verify"));
 
         assert!(message.contains("/grate hytale status"));
+        assert!(message.contains("/grate hytale check-update"));
         assert!(message.contains("/grate hytale update"));
     }
 }

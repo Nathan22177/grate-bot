@@ -42,6 +42,7 @@ Full Grateic Phone rules, setup options, modes, canvas settings, and validation 
 | `/grate hytale start` | Start the Hytale service. |
 | `/grate hytale stop` | Stop the Hytale service. |
 | `/grate hytale restart` | Restart the Hytale service. |
+| `/grate hytale check-update` | Check whether a Hytale server update is available without applying it. |
 | `/grate hytale update` | Update the Hytale server and restart it. |
 
 Hytale management commands require the configured Hytale manager role. The feature overview, runtime settings, script contract, and operations flow live in [docs/HYTALE.md](docs/HYTALE.md).

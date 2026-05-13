@@ -1,0 +1,55 @@
+name: Deploy branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to deploy. Leave blank to deploy the selected workflow branch.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-branch
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy selected branch to Linux server
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Configure SSH
+        env:
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          test -n "${DEPLOY_SSH_KEY}" || { echo "::error::DEPLOY_SSH_KEY secret is required"; exit 1; }
+          test -n "${DEPLOY_KNOWN_HOSTS}" || { echo "::error::DEPLOY_KNOWN_HOSTS secret is required"; exit 1; }
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > ~/.ssh/deploy_key
+          printf '%s\n' "${DEPLOY_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy branch
+        env:
+          DEPLOY_BRANCH: ${{ inputs.branch || github.ref_name }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_REPO_DIR: ${{ vars.DEPLOY_REPO_DIR }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          test -n "${DEPLOY_BRANCH}" || { echo "::error::No branch was selected"; exit 1; }
+          test -n "${DEPLOY_HOST}" || { echo "::error::DEPLOY_HOST secret is required"; exit 1; }
+          test -n "${DEPLOY_USER}" || { echo "::error::DEPLOY_USER secret is required"; exit 1; }
+          test -n "${DEPLOY_REPO_DIR}" || { echo "::error::DEPLOY_REPO_DIR repository variable is required"; exit 1; }
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
+          remote_dir="$(printf '%q' "${DEPLOY_REPO_DIR}")"
+          remote_branch="$(printf '%q' "${DEPLOY_BRANCH}")"
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "cd ${remote_dir} && BRANCH=${remote_branch} deploy/deploy-grate-bot.sh"

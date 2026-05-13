@@ -18,7 +18,7 @@ Required for a normal bot server:
 For Hytale controls:
 
 - A Hytale dedicated server managed by `systemd`.
-- `hytale-manage.sh` and `hytale-update.sh` installed on the same host as the bot.
+- The repository checkout available on the bot host, so the bot can run `deploy/hytale-manage.sh`.
 - A Discord role ID for trusted Hytale managers.
 - Host permissions needed by the management scripts.
 
@@ -95,6 +95,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now grate-bot.service
 ```
 
+`deploy/deploy-grate-bot.sh` generates the systemd unit from the deploy settings, installs it, runs `systemctl daemon-reload`, and enables the service by default. Set `SKIP_SERVICE_FILE=1` if you manage the systemd unit separately.
+
 Useful operations:
 
 ```sh
@@ -107,12 +109,12 @@ sudo systemctl restart grate-bot.service
 
 The Hytale commands assume the bot runs on the same Ubuntu host as the Hytale dedicated server. The bot calls `hytale-manage.sh` for every Hytale action, and the script manages the service through `systemd` as `hytale-server.service` by default. See [docs/HYTALE.md](docs/HYTALE.md) for the full feature explanation.
 
-Install the scripts on the server and make them executable:
+The deploy script points `HYTALE_MANAGE_SCRIPT` at the checked-out repository's `deploy/hytale-manage.sh` by default, so Hytale script changes follow the deployed repo revision. If the checkout lives under a private home directory such as `/home/ubuntu`, deploy installs `acl` when needed and grants narrow ACL access for `BOT_USER` to traverse the script path. Set `SKIP_HYTALE_SCRIPT_CONFIG=1` if you manage `HYTALE_MANAGE_SCRIPT` yourself.
+
+The repository scripts must be executable:
 
 ```sh
-mkdir -p ~/hytale
-cp hytale-manage.sh hytale-update.sh ~/hytale/
-chmod +x ~/hytale/hytale-manage.sh ~/hytale/hytale-update.sh
+chmod +x deploy/hytale-manage.sh deploy/hytale-update.sh deploy/hytale-downloader-update.sh
 ```
 
 Only users with the configured Discord role can run Hytale management commands. Set this to the Discord role ID for trusted Hytale managers:
@@ -127,11 +129,29 @@ Hytale settings:
 HYTALE_SERVICE_NAME=hytale-server.service
 HYTALE_COMMAND_TIMEOUT_SECONDS=15
 HYTALE_DOWNLOAD_TIMEOUT_SECONDS=1800
+START_TIMEOUT_SECONDS=120
+START_STABLE_SECONDS=10
+HYTALE_DIR=/home/ubuntu/hytale
+BACKUP_DIR=/home/ubuntu/hytale-backups
 ```
 
-By default, the bot looks for `hytale-manage.sh` in `~/hytale` for the user running the bot. Set `HYTALE_MANAGE_SCRIPT` only if the script lives somewhere else, and use an absolute path in service environment files.
+When using `deploy/deploy-grate-bot.sh`, deploy sets `HYTALE_MANAGE_SCRIPT` in `ENV_FILE` to the repo script path automatically. It also seeds these updater commands when they are missing:
 
-`HYTALE_COMMAND_TIMEOUT_SECONDS` is used for `/grate hytale status`, `logs`, `start`, `stop`, and `restart`. `HYTALE_DOWNLOAD_TIMEOUT_SECONDS` is used for `/grate hytale update` and is passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`.
+```sh
+HYTALE_CHECK_UPDATE_COMMAND='<repo>/deploy/hytale-downloader-update.sh check-update'
+HYTALE_UPDATE_COMMAND='<repo>/deploy/hytale-downloader-update.sh update'
+```
+
+Override those values only if the host uses a different Hytale update tool. Use single quotes when the command contains spaces:
+
+```sh
+sudoedit /etc/grate-bot/grate-bot.env
+sudo systemctl restart grate-bot.service
+```
+
+Deploy also seeds `HYTALE_DIR` and `BACKUP_DIR` to the deploy user's home paths when they are missing, and grants the bot user ACL access to those directories.
+
+`HYTALE_COMMAND_TIMEOUT_SECONDS` is used for `/grate hytale status`, `logs`, `start`, `stop`, and `restart`. `HYTALE_DOWNLOAD_TIMEOUT_SECONDS` is used for `/grate hytale check-update` and `/grate hytale update` and is passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`. `START_TIMEOUT_SECONDS` and `START_STABLE_SECONDS` are used by `hytale-manage.sh` after start, restart, and update before reporting success. `HYTALE_CHECK_UPDATE_COMMAND` and `HYTALE_UPDATE_COMMAND` are used by `hytale-update.sh`; keep the check command read-only. The migrated downloader check runs `-print-version` for the configured patchline and compares it with the installed server version inferred from `HYTALE_DIR`.
 
 The bot only calls the configured management script with one allowlisted action:
 
@@ -140,13 +160,24 @@ The bot only calls the configured management script with one allowlisted action:
 - `start`
 - `stop`
 - `restart`
+- `check-update`
 - `update`
 
-The scripts use `sudo -n`, so the bot's host user needs passwordless sudo for the commands the scripts run. Replace `BOT_USER` with the Linux user that runs the bot:
+The deploy script installs these Hytale sudoers rules by default, using `BOT_USER`, `HYTALE_SERVICE_NAME`, and `HYTALE_SUDOERS_FILE`. Set `SKIP_HYTALE_SUDOERS=1` if you manage sudoers separately.
+
+For manual setup or review, the scripts use `sudo -n`, so the bot's host user needs passwordless sudo for the commands the scripts run. Replace `BOT_USER` with the Linux user that runs the bot:
 
 ```sudoers
 BOT_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start hytale-server.service, /usr/bin/systemctl stop hytale-server.service, /usr/bin/systemctl restart hytale-server.service
-BOT_USER ALL=(root) NOPASSWD: /usr/bin/apt, /usr/bin/dpkg, /usr/bin/tee, /usr/bin/test
+BOT_USER ALL=(root) NOPASSWD: /usr/bin/systemctl status hytale-server.service --no-pager
+BOT_USER ALL=(root) NOPASSWD: /usr/bin/apt, /usr/bin/apt-get, /usr/bin/chmod, /usr/bin/dpkg, /usr/bin/journalctl, /usr/bin/tee, /usr/bin/test
+```
+
+Install sudoers entries with `visudo`, for example `sudo visudo -f /etc/sudoers.d/grate-bot-hytale`, and make sure the service name matches `HYTALE_SERVICE_NAME`. Verify the bot user can run the needed commands without an interactive password prompt:
+
+```sh
+sudo -u BOT_USER sudo -n systemctl status hytale-server.service --no-pager
+sudo -u BOT_USER sudo -n systemctl restart hytale-server.service
 ```
 
 The bot's host user also needs permission to read service logs with `journalctl`. On Ubuntu, that usually means adding the bot user to a journal-reading group such as `systemd-journal`.

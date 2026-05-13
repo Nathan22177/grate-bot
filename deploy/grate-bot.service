@@ -12,7 +12,7 @@ EnvironmentFile=/etc/grate-bot/grate-bot.env
 ExecStart=/opt/grate-bot/grate-bot
 Restart=on-failure
 RestartSec=10
-NoNewPrivileges=true
+NoNewPrivileges=false
 PrivateTmp=true
 
 [Install]
