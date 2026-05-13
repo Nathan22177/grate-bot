@@ -106,9 +106,11 @@ ensure_downloader_runtime() {
   require_cmd unzip
   require_cmd timeout
   require_cmd tee
+  require_cmd apt-get
 
   report_stage runtime running "checking amd64 downloader runtime"
   local foreign_arches
+  local apt_log
   foreign_arches="$(dpkg --print-foreign-architectures || true)"
   if ! grep -qx 'amd64' <<<"$foreign_arches"; then
     log "Enabling amd64 as a temporary foreign architecture"
@@ -118,13 +120,21 @@ ensure_downloader_runtime() {
   ensure_temp_amd64_sources
 
   report_stage runtime running "refreshing apt metadata"
-  if ! sudo_cmd apt update; then
+  apt_log="$(mktemp)"
+  if ! sudo_cmd apt-get update >"$apt_log" 2>&1; then
     log "apt update reported expected amd64 index errors from ubuntu-ports; continuing"
     report_stage runtime running "apt update reported expected amd64 index errors; continuing"
   fi
+  rm -f "$apt_log"
 
   report_stage runtime running "installing downloader runtime dependencies"
-  sudo_cmd apt install -y qemu-user-static libc6:amd64 libstdc++6:amd64 zlib1g:amd64
+  apt_log="$(mktemp)"
+  if ! sudo_cmd apt-get install -y qemu-user-static libc6:amd64 libstdc++6:amd64 zlib1g:amd64 >"$apt_log" 2>&1; then
+    tail -n 20 "$apt_log" >&2 || true
+    rm -f "$apt_log"
+    fail "failed to install downloader runtime dependencies"
+  fi
+  rm -f "$apt_log"
   report_stage runtime completed "downloader runtime is ready"
 }
 
