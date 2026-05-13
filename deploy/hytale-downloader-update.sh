@@ -231,7 +231,6 @@ run_downloader() {
 
 local_server_version() {
   local version
-  local zip_name
 
   if [[ -f "$HTYALE_DIR/Server/HytaleServer.jar" ]]; then
     version="$(unzip -p "$HTYALE_DIR/Server/HytaleServer.jar" META-INF/MANIFEST.MF 2>/dev/null \
@@ -240,14 +239,6 @@ local_server_version() {
     if [[ -n "$version" ]]; then
       printf '%s\n' "$version"
       return
-    fi
-  fi
-
-  zip_name="$(latest_server_zip || true)"
-  if [[ -n "$zip_name" ]]; then
-    version="$(grep -Eo '20[0-9]{2}\.[0-9]{2}\.[0-9]{2}-[0-9A-Za-z]+' <<<"$zip_name" | head -n 1 || true)"
-    if [[ -n "$version" ]]; then
-      printf '%s\n' "$version"
     fi
   fi
 }
@@ -378,7 +369,7 @@ check_update() {
       printf 'Server update available: %s -> %s\n' "$installed_version" "$remote_version"
     fi
   else
-    printf 'Installed server version: unknown; could not infer it from %s.\n' "$HTYALE_DIR"
+    printf 'Installed server version: unknown; could not infer it from %s/Server/HytaleServer.jar.\n' "$HTYALE_DIR"
   fi
 
   zip_name="$(latest_server_zip || true)"
