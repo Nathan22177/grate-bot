@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+export PATH="$HOME/.cargo/bin:$PATH"
+
 SERVICE_NAME="${SERVICE_NAME:-grate-bot.service}"
 BOT_USER="${BOT_USER:-grate-bot}"
 BOT_GROUP="${BOT_GROUP:-$BOT_USER}"
@@ -297,12 +299,16 @@ Examples:
 EOF
 }
 
+artifact_root=""
+artifact_tmp=""
+artifact_binary="target/release/$BIN_NAME"
+artifact_deploy_dir=""
+
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
 fi
 
-need_cmd cargo
 need_cmd find
 need_cmd git
 need_cmd install
@@ -310,6 +316,11 @@ need_cmd sudo
 need_cmd systemctl
 if [[ -n "$RELEASE_ARCHIVE" ]]; then
   need_cmd tar
+else
+  need_cmd cargo
+fi
+if [[ "$SKIP_BUILD" != "1" ]]; then
+  need_cmd cargo
 fi
 if [[ "$SKIP_HYTALE_SCRIPT_CONFIG" != "1" ]]; then
   need_cmd getent
@@ -322,10 +333,6 @@ if [[ ! -f Cargo.toml ]]; then
   fail "run this script from the grate-bot repository root"
 fi
 
-artifact_root=""
-artifact_tmp=""
-artifact_binary="target/release/$BIN_NAME"
-artifact_deploy_dir=""
 if [[ -n "$RELEASE_ARCHIVE" ]]; then
   [[ "$RELEASE_ARCHIVE" == /* ]] || fail "RELEASE_ARCHIVE must be an absolute path: $RELEASE_ARCHIVE"
   [[ -f "$RELEASE_ARCHIVE" ]] || fail "RELEASE_ARCHIVE does not exist: $RELEASE_ARCHIVE"
