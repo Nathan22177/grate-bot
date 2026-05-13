@@ -71,7 +71,7 @@ jobs:
             exit 0
           fi
 
-          if git diff --quiet "${latest_tag}..HEAD" -- Cargo.toml Cargo.lock build.rs src README.md MAINTAINER_SETUP.md docs deploy .github/workflows; then
+          if git diff --quiet "${latest_tag}..HEAD" -- Cargo.toml Cargo.lock build.rs src deploy .github/workflows; then
             echo "::error::No releasable changes found since ${latest_tag}. Refusing to bump the version and create an empty release."
             exit 1
           fi
