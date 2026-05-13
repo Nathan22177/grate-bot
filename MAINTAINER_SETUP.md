@@ -109,7 +109,7 @@ sudo systemctl restart grate-bot.service
 
 The Hytale commands assume the bot runs on the same Ubuntu host as the Hytale dedicated server. The bot calls `hytale-manage.sh` for every Hytale action, and the script manages the service through `systemd` as `hytale-server.service` by default. See [docs/HYTALE.md](docs/HYTALE.md) for the full feature explanation.
 
-The deploy script points `HYTALE_MANAGE_SCRIPT` at the checked-out repository's `deploy/hytale-manage.sh` by default, so Hytale script changes follow the deployed repo revision. If the checkout lives under a private home directory such as `/home/ubuntu`, deploy grants narrow ACL access for `BOT_USER` to traverse the script path when `setfacl` is available. Set `SKIP_HYTALE_SCRIPT_CONFIG=1` if you manage `HYTALE_MANAGE_SCRIPT` yourself.
+The deploy script points `HYTALE_MANAGE_SCRIPT` at the checked-out repository's `deploy/hytale-manage.sh` by default, so Hytale script changes follow the deployed repo revision. If the checkout lives under a private home directory such as `/home/ubuntu`, deploy installs `acl` when needed and grants narrow ACL access for `BOT_USER` to traverse the script path. Set `SKIP_HYTALE_SCRIPT_CONFIG=1` if you manage `HYTALE_MANAGE_SCRIPT` yourself.
 
 The repository scripts must be executable:
 

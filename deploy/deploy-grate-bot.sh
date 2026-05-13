@@ -92,7 +92,18 @@ grant_bot_script_access() {
   fi
 
   if ! command -v setfacl >/dev/null 2>&1; then
-    fail "$BOT_USER cannot execute $script_path. Install acl/setfacl or move the repo to /srv/grate-bot or /opt/grate-bot so $BOT_USER can traverse the script path."
+    log "$BOT_USER cannot execute $script_path and setfacl is missing; installing acl"
+    if command -v apt-get >/dev/null 2>&1; then
+      sudo apt-get update
+      sudo apt-get install -y acl
+    elif command -v apt >/dev/null 2>&1; then
+      sudo apt update
+      sudo apt install -y acl
+    else
+      fail "$BOT_USER cannot execute $script_path and setfacl is missing. Install acl/setfacl or move the repo to /srv/grate-bot or /opt/grate-bot so $BOT_USER can traverse the script path."
+    fi
+
+    command -v setfacl >/dev/null 2>&1 || fail "acl install completed but setfacl is still unavailable"
   fi
 
   log "Granting $BOT_USER execute access to $script_path"
