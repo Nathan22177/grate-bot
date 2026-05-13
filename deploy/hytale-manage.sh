@@ -62,14 +62,25 @@ print_service_diagnostics() {
 
 print_diagnostics() {
   printf '== service ==\n'
-  sudo -n systemctl status "$SERVICE_NAME" --no-pager || true
+  sudo -n systemctl status "$SERVICE_NAME" --no-pager --lines=0 || true
+
+  printf '\n== service properties ==\n'
+  sudo -n systemctl show "$SERVICE_NAME" \
+    --property=ActiveState \
+    --property=SubState \
+    --property=MainPID \
+    --property=ExecMainStatus \
+    --property=ExecMainCode \
+    --property=RestartUSec \
+    --property=NRestarts \
+    --no-pager || true
 
   printf '\n== udp listeners ==\n'
   if command -v ss >/dev/null 2>&1; then
-    if ! sudo -n ss -H -lunp | grep -E "(:|\\*)${HYTALE_PORT}\\b|hytale|java"; then
+    if ! sudo -n ss -H -lunp | grep -E "(:|\\*)${HYTALE_PORT}\\b|hytale|java" | head -n 20; then
       printf 'No UDP listener matched port %s, hytale, or java.\n' "$HYTALE_PORT"
       printf 'All UDP listeners:\n'
-      sudo -n ss -H -lunp || true
+      sudo -n ss -H -lunp | head -n 40 || true
     fi
   else
     printf 'ss is not installed; cannot inspect UDP listeners.\n'
@@ -83,7 +94,7 @@ print_diagnostics() {
   fi
 
   printf '\n== recent logs ==\n'
-  sudo -n journalctl -u "$SERVICE_NAME" -n "$LOG_LINES" --no-pager || true
+  sudo -n journalctl -u "$SERVICE_NAME" -n 30 --no-pager || true
 
   printf '\n== quic note ==\n'
   printf 'Hytale client connections use QUIC over UDP. If the service is active and listening, verify host firewall and cloud security rules allow UDP %s inbound to this server.\n' "$HYTALE_PORT"
