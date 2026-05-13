@@ -81,6 +81,32 @@ validate_manage_script_path() {
   esac
 }
 
+grant_bot_script_access() {
+  local script_path="$1"
+  local dir
+
+  [[ -e "$script_path" ]] || fail "script path does not exist: $script_path"
+
+  if sudo -u "$BOT_USER" test -x "$script_path"; then
+    return 0
+  fi
+
+  if ! command -v setfacl >/dev/null 2>&1; then
+    fail "$BOT_USER cannot execute $script_path. Install acl/setfacl or move the repo to /srv/grate-bot or /opt/grate-bot so $BOT_USER can traverse the script path."
+  fi
+
+  log "Granting $BOT_USER execute access to $script_path"
+  sudo setfacl -m "u:$BOT_USER:rx" "$script_path"
+
+  dir="$(dirname "$script_path")"
+  while [[ "$dir" != "/" ]]; do
+    sudo setfacl -m "u:$BOT_USER:--x" "$dir"
+    dir="$(dirname "$dir")"
+  done
+
+  sudo -u "$BOT_USER" test -x "$script_path" || fail "$BOT_USER still cannot execute $script_path after applying ACLs"
+}
+
 upsert_env_file_value() {
   local key="$1"
   local value="$2"
@@ -220,7 +246,12 @@ if [[ "$SKIP_HYTALE_SCRIPT_CONFIG" != "1" ]]; then
 
   validate_manage_script_path "$HYTALE_MANAGE_SCRIPT"
   [[ -x "$HYTALE_MANAGE_SCRIPT" ]] || fail "Hytale manage script is not executable: $HYTALE_MANAGE_SCRIPT"
-  sudo -u "$BOT_USER" test -x "$HYTALE_MANAGE_SCRIPT" || fail "$BOT_USER cannot execute $HYTALE_MANAGE_SCRIPT"
+  grant_bot_script_access "$HYTALE_MANAGE_SCRIPT"
+
+  HYTALE_UPDATE_SCRIPT="$(env_file_simple_value HYTALE_UPDATE_SCRIPT || true)"
+  HYTALE_UPDATE_SCRIPT="${HYTALE_UPDATE_SCRIPT:-$(dirname "$HYTALE_MANAGE_SCRIPT")/hytale-update.sh}"
+  [[ -x "$HYTALE_UPDATE_SCRIPT" ]] || fail "Hytale update script is not executable: $HYTALE_UPDATE_SCRIPT"
+  grant_bot_script_access "$HYTALE_UPDATE_SCRIPT"
 
   log "Pointing HYTALE_MANAGE_SCRIPT at $HYTALE_MANAGE_SCRIPT"
   upsert_env_file_value HYTALE_MANAGE_SCRIPT "$HYTALE_MANAGE_SCRIPT"
@@ -262,10 +293,10 @@ if [[ "$SKIP_HYTALE_SUDOERS" != "1" ]]; then
     [[ -n "$test_path" ]] && sudo_commands+=("$test_path")
     if [[ "${#sudo_commands[@]}" -gt 0 ]]; then
       printf '%s ALL=(root) NOPASSWD: ' "$BOT_USER"
-      local_separator=""
+      separator=""
       for sudo_command in "${sudo_commands[@]}"; do
-        printf '%s%s' "$local_separator" "$sudo_command"
-        local_separator=", "
+        printf '%s%s' "$separator" "$sudo_command"
+        separator=", "
       done
       printf '\n'
     fi
