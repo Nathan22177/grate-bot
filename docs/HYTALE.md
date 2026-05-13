@@ -76,7 +76,7 @@ The bot streams JSON progress states back to Discord and includes trimmed non-JS
 HYTALE_MANAGE_SCRIPT check-update
 ```
 
-The manager script is responsible for checking the local and remote server versions without stopping, updating, or restarting the service. The command should print a concise human-readable result, for example whether the server is current or which version is available.
+The manager script is responsible for checking update state without stopping, updating, or restarting the service. The migrated downloader updater runs the Hytale Downloader CLI with `-check-update` to check the downloader tool and `-print-version` to show the latest game version for the configured patchline, without extracting or applying server files.
 
 ## Update Behavior
 
@@ -101,19 +101,19 @@ When deployed with `deploy/deploy-grate-bot.sh`, the bot runs the scripts direct
 The repository scripts must be executable:
 
 ```sh
-chmod +x deploy/hytale-manage.sh deploy/hytale-update.sh
+chmod +x deploy/hytale-manage.sh deploy/hytale-update.sh deploy/hytale-downloader-update.sh
 ```
 
 If the repo is checked out under a private home directory such as `/home/ubuntu`, deploy installs `acl` when needed and grants narrow ACL access for the bot user. Alternatively, keep the checkout under a service path such as `/srv/grate-bot` or `/opt/grate-bot`.
 
-`hytale-update.sh` intentionally delegates the Hytale-specific downloader work to host-configured commands:
+`hytale-update.sh` delegates the Hytale-specific downloader work to configured commands. The deploy script seeds these commands automatically to call the migrated legacy downloader workflow in `deploy/hytale-downloader-update.sh`:
 
 ```sh
-HYTALE_CHECK_UPDATE_COMMAND='your read-only update check command'
-HYTALE_UPDATE_COMMAND='your update command'
+HYTALE_CHECK_UPDATE_COMMAND='<repo>/deploy/hytale-downloader-update.sh check-update'
+HYTALE_UPDATE_COMMAND='<repo>/deploy/hytale-downloader-update.sh update'
 ```
 
-Set these in the bot service environment or another environment file sourced by the script. `HYTALE_CHECK_UPDATE_COMMAND` must not stop, update, or restart the service.
+Override these in `/etc/grate-bot/grate-bot.env` only if this host uses a different Hytale update tool. `HYTALE_CHECK_UPDATE_COMMAND` must not stop, update, extract server files, or restart the service.
 
 The scripts use `sudo -n`, so the bot's host user needs passwordless sudo for the commands the scripts run. If Discord shows `sudo: a password is required`, the sudoers entry is missing or does not match the command path/service name. It also needs permission to read service logs with `journalctl`; on Ubuntu, that usually means membership in a journal-reading group such as `systemd-journal`.
 

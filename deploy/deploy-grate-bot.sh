@@ -12,6 +12,7 @@ SERVICE_FILE="${SERVICE_FILE:-/etc/systemd/system/$SERVICE_NAME}"
 BRANCH="${BRANCH:-}"
 REMOTE="${REMOTE:-origin}"
 HYTALE_MANAGE_SCRIPT="${HYTALE_MANAGE_SCRIPT:-}"
+HYTALE_DOWNLOADER_UPDATE_SCRIPT="${HYTALE_DOWNLOADER_UPDATE_SCRIPT:-}"
 HYTALE_SERVICE_NAME="${HYTALE_SERVICE_NAME:-}"
 HYTALE_SUDOERS_FILE="${HYTALE_SUDOERS_FILE:-/etc/sudoers.d/grate-bot-hytale}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
@@ -116,6 +117,13 @@ grant_bot_script_access() {
   sudo -u "$BOT_USER" test -x "$script_path" || fail "$BOT_USER still cannot execute $script_path after applying ACLs"
 }
 
+shell_quote_env_value() {
+  local value="$1"
+
+  [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || fail "environment value cannot contain newlines"
+  printf "'%s'" "${value//\'/\'\\\'\'}"
+}
+
 upsert_env_file_value() {
   local key="$1"
   local value="$2"
@@ -163,6 +171,62 @@ upsert_env_file_value() {
   trap - EXIT
 }
 
+upsert_env_file_shell_value() {
+  local key="$1"
+  local value="$2"
+  local quoted
+
+  quoted="$(shell_quote_env_value "$value")"
+  upsert_env_file_assignment "$key" "$quoted"
+}
+
+upsert_env_file_assignment() {
+  local key="$1"
+  local assignment_value="$2"
+  local tmp output assignment replaced owner group mode
+
+  tmp="$(mktemp)"
+  output="$(mktemp)"
+  cleanup_env_tmp() {
+    rm -f "$tmp" "$output"
+  }
+  trap cleanup_env_tmp EXIT
+
+  if sudo test -f "$ENV_FILE"; then
+    sudo cp "$ENV_FILE" "$tmp"
+    owner="$(sudo stat -c '%U' "$ENV_FILE")"
+    group="$(sudo stat -c '%G' "$ENV_FILE")"
+    mode="$(sudo stat -c '%a' "$ENV_FILE")"
+  else
+    : >"$tmp"
+    getent group "$BOT_GROUP" >/dev/null || fail "group does not exist for new env file: $BOT_GROUP"
+    owner="root"
+    group="$BOT_GROUP"
+    mode="640"
+  fi
+
+  [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || fail "invalid environment key: $key"
+  assignment="$key=$assignment_value"
+  replaced=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?${key}= ]]; then
+      printf '%s\n' "$assignment" >>"$output"
+      replaced=1
+    else
+      printf '%s\n' "$line" >>"$output"
+    fi
+  done <"$tmp"
+
+  if [[ "$replaced" != "1" ]]; then
+    printf '%s\n' "$assignment" >>"$output"
+  fi
+
+  sudo install -d -o root -g "$group" -m 0750 "$(dirname "$ENV_FILE")"
+  sudo install -o "$owner" -g "$group" -m "$mode" "$output" "$ENV_FILE"
+  cleanup_env_tmp
+  trap - EXIT
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -181,6 +245,8 @@ Environment overrides:
   REMOTE                       default: origin
   BRANCH                       branch to deploy; prompts when unset, default: main
   HYTALE_MANAGE_SCRIPT         default: this repo's deploy/hytale-manage.sh
+  HYTALE_DOWNLOADER_UPDATE_SCRIPT
+                               default: this repo's deploy/hytale-downloader-update.sh
   HYTALE_SERVICE_NAME          default: hytale-server.service
   HYTALE_SUDOERS_FILE          default: /etc/sudoers.d/grate-bot-hytale
   SKIP_GIT_PULL=1              do not git checkout/pull
@@ -262,8 +328,23 @@ if [[ "$SKIP_HYTALE_SCRIPT_CONFIG" != "1" ]]; then
   [[ -x "$HYTALE_UPDATE_SCRIPT" ]] || fail "Hytale update script is not executable: $HYTALE_UPDATE_SCRIPT"
   grant_bot_script_access "$HYTALE_UPDATE_SCRIPT"
 
+  if [[ -z "$HYTALE_DOWNLOADER_UPDATE_SCRIPT" ]]; then
+    HYTALE_DOWNLOADER_UPDATE_SCRIPT="$(dirname "$HYTALE_MANAGE_SCRIPT")/hytale-downloader-update.sh"
+  fi
+  [[ -x "$HYTALE_DOWNLOADER_UPDATE_SCRIPT" ]] || fail "Hytale downloader update script is not executable: $HYTALE_DOWNLOADER_UPDATE_SCRIPT"
+  grant_bot_script_access "$HYTALE_DOWNLOADER_UPDATE_SCRIPT"
+
   log "Pointing HYTALE_MANAGE_SCRIPT at $HYTALE_MANAGE_SCRIPT"
   upsert_env_file_value HYTALE_MANAGE_SCRIPT "$HYTALE_MANAGE_SCRIPT"
+
+  if ! env_file_simple_value HYTALE_CHECK_UPDATE_COMMAND >/dev/null; then
+    log "Setting HYTALE_CHECK_UPDATE_COMMAND to the migrated repo updater"
+    upsert_env_file_shell_value HYTALE_CHECK_UPDATE_COMMAND "$HYTALE_DOWNLOADER_UPDATE_SCRIPT check-update"
+  fi
+  if ! env_file_simple_value HYTALE_UPDATE_COMMAND >/dev/null; then
+    log "Setting HYTALE_UPDATE_COMMAND to the migrated repo updater"
+    upsert_env_file_shell_value HYTALE_UPDATE_COMMAND "$HYTALE_DOWNLOADER_UPDATE_SCRIPT update"
+  fi
 else
   log "Skipping Hytale manage script env config"
 fi

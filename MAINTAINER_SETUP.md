@@ -114,7 +114,7 @@ The deploy script points `HYTALE_MANAGE_SCRIPT` at the checked-out repository's 
 The repository scripts must be executable:
 
 ```sh
-chmod +x deploy/hytale-manage.sh deploy/hytale-update.sh
+chmod +x deploy/hytale-manage.sh deploy/hytale-update.sh deploy/hytale-downloader-update.sh
 ```
 
 Only users with the configured Discord role can run Hytale management commands. Set this to the Discord role ID for trusted Hytale managers:
@@ -129,13 +129,23 @@ Hytale settings:
 HYTALE_SERVICE_NAME=hytale-server.service
 HYTALE_COMMAND_TIMEOUT_SECONDS=15
 HYTALE_DOWNLOAD_TIMEOUT_SECONDS=1800
-HYTALE_CHECK_UPDATE_COMMAND='your read-only update check command'
-HYTALE_UPDATE_COMMAND='your update command'
 ```
 
-When using `deploy/deploy-grate-bot.sh`, deploy sets `HYTALE_MANAGE_SCRIPT` in `ENV_FILE` to the repo script path automatically.
+When using `deploy/deploy-grate-bot.sh`, deploy sets `HYTALE_MANAGE_SCRIPT` in `ENV_FILE` to the repo script path automatically. It also seeds these updater commands when they are missing:
 
-`HYTALE_COMMAND_TIMEOUT_SECONDS` is used for `/grate hytale status`, `logs`, `start`, `stop`, and `restart`. `HYTALE_DOWNLOAD_TIMEOUT_SECONDS` is used for `/grate hytale check-update` and `/grate hytale update` and is passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`. `HYTALE_CHECK_UPDATE_COMMAND` and `HYTALE_UPDATE_COMMAND` are used by `hytale-update.sh`; keep the check command read-only.
+```sh
+HYTALE_CHECK_UPDATE_COMMAND='<repo>/deploy/hytale-downloader-update.sh check-update'
+HYTALE_UPDATE_COMMAND='<repo>/deploy/hytale-downloader-update.sh update'
+```
+
+Override those values only if the host uses a different Hytale update tool. Use single quotes when the command contains spaces:
+
+```sh
+sudoedit /etc/grate-bot/grate-bot.env
+sudo systemctl restart grate-bot.service
+```
+
+`HYTALE_COMMAND_TIMEOUT_SECONDS` is used for `/grate hytale status`, `logs`, `start`, `stop`, and `restart`. `HYTALE_DOWNLOAD_TIMEOUT_SECONDS` is used for `/grate hytale check-update` and `/grate hytale update` and is passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`. `HYTALE_CHECK_UPDATE_COMMAND` and `HYTALE_UPDATE_COMMAND` are used by `hytale-update.sh`; keep the check command read-only. The migrated downloader check runs `-check-update` for the downloader tool and `-print-version` for the configured patchline.
 
 The bot only calls the configured management script with one allowlisted action:
 
