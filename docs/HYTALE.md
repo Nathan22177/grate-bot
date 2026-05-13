@@ -123,7 +123,7 @@ Deployment and service setup details live in [../MAINTAINER_SETUP.md](../MAINTAI
 
 - If commands say controls are not set up, set `HYTALE_MANAGER_ROLE_ID`.
 - If you lack permission, ask for the configured Hytale manager role.
-- If a command fails to start, check `HYTALE_MANAGE_SCRIPT` and make sure the script exists and is executable by the bot user. For repo paths under `/home/ubuntu`, deploy should install `acl` and grant access automatically; if that is blocked, move the checkout under `/srv/grate-bot` or `/opt/grate-bot`.
+- If a command fails to start, check `HYTALE_MANAGE_SCRIPT` and make sure the script exists and is executable by the bot user. For repo paths under `/home/ubuntu`, deploy should install `acl` and grant access automatically; if apt is misconfigured or blocked, move the checkout under `/srv/grate-bot` or `/opt/grate-bot`.
 - If a script action fails with `sudo: a password is required`, configure passwordless sudo for the bot host user and verify it with `sudo -u BOT_USER sudo -n systemctl status hytale-server.service --no-pager`.
 - If a script action fails for another reason, check host sudoers, systemd permissions, journal access, and the script output shown in Discord.
 - If update waits for auth, complete the Hytale downloader authorization flow on the host.

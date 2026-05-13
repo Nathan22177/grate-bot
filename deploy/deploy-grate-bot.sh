@@ -94,11 +94,9 @@ grant_bot_script_access() {
   if ! command -v setfacl >/dev/null 2>&1; then
     log "$BOT_USER cannot execute $script_path and setfacl is missing; installing acl"
     if command -v apt-get >/dev/null 2>&1; then
-      sudo apt-get update
-      sudo apt-get install -y acl
+      sudo apt-get install -y acl || fail "could not install acl. If apt shows ubuntu-ports binary-amd64 404s, fix /etc/apt/sources.list or move the repo to /srv/grate-bot or /opt/grate-bot."
     elif command -v apt >/dev/null 2>&1; then
-      sudo apt update
-      sudo apt install -y acl
+      sudo apt install -y acl || fail "could not install acl. If apt shows ubuntu-ports binary-amd64 404s, fix /etc/apt/sources.list or move the repo to /srv/grate-bot or /opt/grate-bot."
     else
       fail "$BOT_USER cannot execute $script_path and setfacl is missing. Install acl/setfacl or move the repo to /srv/grate-bot or /opt/grate-bot so $BOT_USER can traverse the script path."
     fi
