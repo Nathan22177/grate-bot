@@ -122,12 +122,13 @@ fn release_url() -> String {
 fn release_checksum_url() -> String {
     let repository = option_env!("BUILD_REPOSITORY").unwrap_or("unknown");
     let tag = option_env!("BUILD_RELEASE_TAG").unwrap_or("unknown");
+    let arch = option_env!("BUILD_RELEASE_ARCH").unwrap_or("unknown");
 
-    if repository == "unknown" || tag == "unknown" {
+    if repository == "unknown" || tag == "unknown" || arch == "unknown" {
         "`unknown`".to_owned()
     } else {
         format!(
-            "https://github.com/{repository}/releases/download/{tag}/grate-bot-{tag}-x86_64-unknown-linux-gnu.sha256"
+            "https://github.com/{repository}/releases/download/{tag}/grate-bot-{tag}-{arch}.sha256"
         )
     }
 }

@@ -132,7 +132,7 @@ DEPLOY_REPO_DIR=/path/to/grate-bot/repository/on/server
 
 The release workflow bumps the package version from `major.minor.patch` to `major.(minor + 1).0`; for example, `0.1.4` becomes `0.2.0`.
 
-The release workflow also uploads `grate-bot-vX.Y.Z-x86_64-unknown-linux-gnu.sha256`, which contains the SHA-256 checksum of the released executable inside the release archive. `/grate verify` reports the running executable SHA-256 and links to that checksum asset, so users can verify the live bot is running the official GitHub release binary.
+The release workflow builds on GitHub's ARM64 Ubuntu runner for the ARM64 Linux server and uploads `grate-bot-vX.Y.Z-aarch64-unknown-linux-gnu.sha256`, which contains the SHA-256 checksum of the released executable inside the release archive. `/grate verify` reports the running executable SHA-256 and links to that checksum asset, so users can verify the live bot is running the official GitHub release binary.
 
 ## Hytale Management Setup
 

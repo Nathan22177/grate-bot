@@ -17,6 +17,7 @@ fn main() {
     set_build_env("BUILD_SOURCE_REF", source_ref());
     set_build_env("BUILD_COMMIT", build_commit());
     set_build_env("BUILD_REPOSITORY", build_repository());
+    set_build_env("BUILD_RELEASE_ARCH", build_release_arch());
     set_build_env("BUILD_RELEASE_TAG", build_release_tag());
     println!("cargo:rustc-env=BUILD_INPUT_STATE={}", build_input_state());
 }
@@ -48,6 +49,10 @@ fn build_repository() -> String {
 
 fn build_release_tag() -> String {
     env_value("BUILD_RELEASE_TAG").unwrap_or_else(|| "unknown".to_owned())
+}
+
+fn build_release_arch() -> String {
+    env_value("BUILD_RELEASE_ARCH").unwrap_or_else(|| "unknown".to_owned())
 }
 
 fn env_value(key: &str) -> Option<String> {
