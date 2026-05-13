@@ -8,7 +8,6 @@ START_TIMEOUT_SECONDS="${START_TIMEOUT_SECONDS:-120}"
 START_STABLE_SECONDS="${START_STABLE_SECONDS:-10}"
 HYTALE_UPDATE_SCRIPT="${HYTALE_UPDATE_SCRIPT:-}"
 HYTALE_DIR="${HYTALE_DIR:-$HOME/hytale}"
-HYTALE_PORT="${HYTALE_PORT:-5520}"
 LOG_LINES="${LOG_LINES:-80}"
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,46 +59,6 @@ print_service_diagnostics() {
   sudo -n journalctl -u "$SERVICE_NAME" -n "$LOG_LINES" --no-pager || true
 }
 
-print_diagnostics() {
-  printf '== service ==\n'
-  sudo -n systemctl status "$SERVICE_NAME" --no-pager --lines=0 || true
-
-  printf '\n== service properties ==\n'
-  sudo -n systemctl show "$SERVICE_NAME" \
-    --property=ActiveState \
-    --property=SubState \
-    --property=MainPID \
-    --property=ExecMainStatus \
-    --property=ExecMainCode \
-    --property=RestartUSec \
-    --property=NRestarts \
-    --no-pager || true
-
-  printf '\n== udp listeners ==\n'
-  if command -v ss >/dev/null 2>&1; then
-    if ! sudo -n ss -H -lunp | grep -E "(:|\\*)${HYTALE_PORT}\\b|hytale|java" | head -n 20; then
-      printf 'No UDP listener matched port %s, hytale, or java.\n' "$HYTALE_PORT"
-      printf 'All UDP listeners:\n'
-      sudo -n ss -H -lunp | head -n 40 || true
-    fi
-  else
-    printf 'ss is not installed; cannot inspect UDP listeners.\n'
-  fi
-
-  printf '\n== hytale config hints ==\n'
-  if [[ -f "$HYTALE_DIR/Server/config.json" ]]; then
-    grep -E '"(bind|port|address|host)"' "$HYTALE_DIR/Server/config.json" || true
-  else
-    printf 'No config file found at %s/Server/config.json\n' "$HYTALE_DIR"
-  fi
-
-  printf '\n== recent logs ==\n'
-  sudo -n journalctl -u "$SERVICE_NAME" -n 30 --no-pager || true
-
-  printf '\n== quic note ==\n'
-  printf 'Hytale client connections use QUIC over UDP. If the service is active and listening, verify host firewall and cloud security rules allow UDP %s inbound to this server.\n' "$HYTALE_PORT"
-}
-
 wait_for_service_ready() {
   local stage="$1"
   local waited=0
@@ -139,9 +98,6 @@ case "$action" in
     ;;
   logs)
     sudo -n journalctl -u "$SERVICE_NAME" -n "$LOG_LINES" --no-pager
-    ;;
-  diagnose)
-    print_diagnostics
     ;;
   start)
     progress start running "starting $SERVICE_NAME"
@@ -193,7 +149,7 @@ case "$action" in
     wait_for_service_ready update
     ;;
   *)
-    printf 'Usage: %s {status|logs|diagnose|start|stop|restart|check-update|update}\n' "$0" >&2
+    printf 'Usage: %s {status|logs|start|stop|restart|check-update|update}\n' "$0" >&2
     exit 2
     ;;
 esac

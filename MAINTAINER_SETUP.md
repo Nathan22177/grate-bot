@@ -129,7 +129,6 @@ Hytale settings:
 HYTALE_SERVICE_NAME=hytale-server.service
 HYTALE_COMMAND_TIMEOUT_SECONDS=15
 HYTALE_DOWNLOAD_TIMEOUT_SECONDS=1800
-HYTALE_PORT=5520
 START_TIMEOUT_SECONDS=120
 START_STABLE_SECONDS=10
 HYTALE_DIR=/home/ubuntu/hytale
@@ -158,7 +157,6 @@ The bot only calls the configured management script with one allowlisted action:
 
 - `status`
 - `logs`
-- `diagnose`
 - `start`
 - `stop`
 - `restart`
@@ -172,7 +170,7 @@ For manual setup or review, the scripts use `sudo -n`, so the bot's host user ne
 ```sudoers
 BOT_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start hytale-server.service, /usr/bin/systemctl stop hytale-server.service, /usr/bin/systemctl restart hytale-server.service
 BOT_USER ALL=(root) NOPASSWD: /usr/bin/systemctl status hytale-server.service --no-pager
-BOT_USER ALL=(root) NOPASSWD: /usr/bin/apt, /usr/bin/apt-get, /usr/bin/chmod, /usr/bin/dpkg, /usr/bin/journalctl, /usr/bin/ss, /usr/bin/tee, /usr/bin/test
+BOT_USER ALL=(root) NOPASSWD: /usr/bin/apt, /usr/bin/apt-get, /usr/bin/chmod, /usr/bin/dpkg, /usr/bin/journalctl, /usr/bin/tee, /usr/bin/test
 ```
 
 Install sudoers entries with `visudo`, for example `sudo visudo -f /etc/sudoers.d/grate-bot-hytale`, and make sure the service name matches `HYTALE_SERVICE_NAME`. Verify the bot user can run the needed commands without an interactive password prompt:

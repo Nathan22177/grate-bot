@@ -412,7 +412,6 @@ if [[ "$SKIP_HYTALE_SUDOERS" != "1" ]]; then
   chmod_path="$(type -P chmod || true)"
   dpkg_path="$(type -P dpkg || true)"
   journalctl_path="$(type -P journalctl || true)"
-  ss_path="$(type -P ss || true)"
   tee_path="$(type -P tee || true)"
   test_path="$(type -P test || true)"
   sudoers_tmp="$(mktemp)"
@@ -436,7 +435,6 @@ if [[ "$SKIP_HYTALE_SUDOERS" != "1" ]]; then
     [[ -n "$chmod_path" ]] && sudo_commands+=("$chmod_path")
     [[ -n "$dpkg_path" ]] && sudo_commands+=("$dpkg_path")
     [[ -n "$journalctl_path" ]] && sudo_commands+=("$journalctl_path")
-    [[ -n "$ss_path" ]] && sudo_commands+=("$ss_path")
     [[ -n "$tee_path" ]] && sudo_commands+=("$tee_path")
     [[ -n "$test_path" ]] && sudo_commands+=("$test_path")
     if [[ "${#sudo_commands[@]}" -gt 0 ]]; then

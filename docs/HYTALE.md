@@ -9,7 +9,6 @@ Hytale management lets trusted Discord helpers check, manage, and update a co-ho
 | `/grate hytale help` | Explain Hytale commands, settings, permissions, operations flow, and troubleshooting. |
 | `/grate hytale status` | Check the Hytale service status. |
 | `/grate hytale logs` | Show recent service logs. |
-| `/grate hytale diagnose` | Show service, UDP listener, config, and log diagnostics. |
 | `/grate hytale start` | Start the Hytale service. |
 | `/grate hytale stop` | Stop the Hytale service. |
 | `/grate hytale restart` | Restart the Hytale service. |
@@ -30,7 +29,6 @@ The bot only passes one of these fixed action arguments:
 
 - `status`
 - `logs`
-- `diagnose`
 - `start`
 - `stop`
 - `restart`
@@ -54,7 +52,6 @@ The bot streams JSON progress states back to Discord and includes trimmed non-JS
 | `HYTALE_MANAGER_ROLE_ID` | Required | Discord role allowed to use Hytale management commands. |
 | `HYTALE_MANAGE_SCRIPT` | `~/hytale/hytale-manage.sh` | Path to the management script. |
 | `HYTALE_SERVICE_NAME` | `hytale-server.service` | Service name passed to the script as `SERVICE_NAME`. |
-| `HYTALE_PORT` | `5520` | UDP port shown in diagnostics; set this if the server uses a custom `--bind` port. |
 | `HYTALE_COMMAND_TIMEOUT_SECONDS` | `15` | Timeout for status, logs, start, stop, and restart; minimum `1`. |
 | `HYTALE_DOWNLOAD_TIMEOUT_SECONDS` | `1800` | Timeout for `/grate hytale check-update` and `/grate hytale update`; also passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`; minimum `1`. |
 
@@ -64,13 +61,12 @@ The bot streams JSON progress states back to Discord and includes trimmed non-JS
 
 1. Run `/grate hytale status`.
 2. If players report issues, run `/grate hytale logs`.
-3. Use `/grate hytale diagnose` when the service is active but clients cannot connect.
-4. Use `/grate hytale start` only when the service is stopped.
-5. Use `/grate hytale restart` when status/logs suggest the service is wedged.
-6. Use `/grate hytale stop` when intentionally taking the server offline.
-7. Use `/grate hytale check-update` to see whether a new server build is available.
-8. Use `/grate hytale update` when applying a new server build.
-9. Re-check `/grate hytale status`.
+3. Use `/grate hytale start` only when the service is stopped.
+4. Use `/grate hytale restart` when status/logs suggest the service is wedged.
+5. Use `/grate hytale stop` when intentionally taking the server offline.
+6. Use `/grate hytale check-update` to see whether a new server build is available.
+7. Use `/grate hytale update` when applying a new server build.
+8. Re-check `/grate hytale status`.
 
 ## Check Update Behavior
 
