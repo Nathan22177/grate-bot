@@ -76,7 +76,7 @@ The bot streams JSON progress states back to Discord and includes trimmed non-JS
 HYTALE_MANAGE_SCRIPT check-update
 ```
 
-The manager script is responsible for checking update state without stopping, updating, or restarting the service. The migrated downloader updater runs the Hytale Downloader CLI with `-check-update` to check the downloader tool and `-print-version` to show the latest game version for the configured patchline, without extracting or applying server files.
+The manager script is responsible for checking update state without stopping, updating, or restarting the service. The migrated downloader updater runs the Hytale Downloader CLI with `-print-version` to find the latest server version for the configured patchline, then compares that to the installed server version inferred from `Server/HytaleServer.jar` or the latest downloaded server zip.
 
 ## Update Behavior
 
@@ -114,6 +114,8 @@ HYTALE_UPDATE_COMMAND='<repo>/deploy/hytale-downloader-update.sh update'
 ```
 
 Override these in `/etc/grate-bot/grate-bot.env` only if this host uses a different Hytale update tool. `HYTALE_CHECK_UPDATE_COMMAND` must not stop, update, extract server files, or restart the service.
+
+Deploy also seeds `HYTALE_DIR` to the deploy user's `~/hytale` and `BACKUP_DIR` to the deploy user's `~/hytale-backups` when they are missing, then grants the bot user ACL access to those directories.
 
 The scripts use `sudo -n`, so the bot's host user needs passwordless sudo for the commands the scripts run. If Discord shows `sudo: a password is required`, the sudoers entry is missing or does not match the command path/service name. It also needs permission to read service logs with `journalctl`; on Ubuntu, that usually means membership in a journal-reading group such as `systemd-journal`.
 

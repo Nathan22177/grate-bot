@@ -215,15 +215,42 @@ run_downloader() {
   report_stage download completed "downloader finished"
 }
 
-check_downloader_update() {
+local_server_version() {
+  local version
+  local zip_name
+
+  if [[ -f "$HTYALE_DIR/Server/HytaleServer.jar" ]]; then
+    version="$(unzip -p "$HTYALE_DIR/Server/HytaleServer.jar" META-INF/MANIFEST.MF 2>/dev/null \
+      | grep -Eo '20[0-9]{2}\.[0-9]{2}\.[0-9]{2}-[0-9A-Za-z]+' \
+      | head -n 1 || true)"
+    if [[ -n "$version" ]]; then
+      printf '%s\n' "$version"
+      return
+    fi
+  fi
+
+  zip_name="$(latest_server_zip || true)"
+  if [[ -n "$zip_name" ]]; then
+    version="$(grep -Eo '20[0-9]{2}\.[0-9]{2}\.[0-9]{2}-[0-9A-Za-z]+' <<<"$zip_name" | head -n 1 || true)"
+    if [[ -n "$version" ]]; then
+      printf '%s\n' "$version"
+    fi
+  fi
+}
+
+latest_server_version() {
+  local output
+  local version
+
   cd "$HTYALE_DIR"
-  report_stage check-update running "checking Hytale downloader updates"
-  timeout --foreground "${DOWNLOAD_TIMEOUT_SECONDS}s" \
-    ./hytale-downloader-linux-amd64 -check-update
-  report_stage check-update running "checking latest Hytale game version for patchline $PATCHLINE"
-  timeout --foreground "${DOWNLOAD_TIMEOUT_SECONDS}s" \
-    ./hytale-downloader-linux-amd64 -patchline "$PATCHLINE" -print-version
-  report_stage check-update completed "Hytale downloader update check completed"
+  output="$(timeout --foreground "${DOWNLOAD_TIMEOUT_SECONDS}s" \
+    ./hytale-downloader-linux-amd64 -patchline "$PATCHLINE" -print-version)"
+  version="$(grep -Eo '20[0-9]{2}\.[0-9]{2}\.[0-9]{2}-[0-9A-Za-z]+' <<<"$output" | tail -n 1 || true)"
+  if [[ -z "$version" ]]; then
+    printf '%s\n' "$output" >&2
+    fail "could not parse latest Hytale server version"
+  fi
+  printf '%s\n' "$version"
 }
 
 latest_server_zip() {
@@ -319,15 +346,34 @@ check_update() {
   report_stage init running "preparing downloader check on $(uname -m)"
   ensure_downloader_runtime
   download_downloader
-  check_downloader_update
 
+  local remote_version
+  local installed_version
   local zip_name
+
+  report_stage check-update running "checking latest Hytale game version for patchline $PATCHLINE"
+  remote_version="$(latest_server_version)"
+  installed_version="$(local_server_version)"
+
+  printf 'Latest available server version: %s\n' "$remote_version"
+  if [[ -n "$installed_version" ]]; then
+    printf 'Installed server version: %s\n' "$installed_version"
+    if [[ "$installed_version" == "$remote_version" ]]; then
+      printf 'Server is up to date.\n'
+    else
+      printf 'Server update available: %s -> %s\n' "$installed_version" "$remote_version"
+    fi
+  else
+    printf 'Installed server version: unknown; could not infer it from %s.\n' "$HTYALE_DIR"
+  fi
+
   zip_name="$(latest_server_zip || true)"
   if [[ -n "$zip_name" ]]; then
     printf 'Latest downloaded server zip: %s\n' "$zip_name"
   else
     printf 'No downloaded server zip found in %s.\n' "$HTYALE_DIR"
   fi
+  report_stage check-update completed "Hytale server update check completed"
 }
 
 update() {

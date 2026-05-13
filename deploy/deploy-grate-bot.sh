@@ -13,6 +13,8 @@ BRANCH="${BRANCH:-}"
 REMOTE="${REMOTE:-origin}"
 HYTALE_MANAGE_SCRIPT="${HYTALE_MANAGE_SCRIPT:-}"
 HYTALE_DOWNLOADER_UPDATE_SCRIPT="${HYTALE_DOWNLOADER_UPDATE_SCRIPT:-}"
+HYTALE_DIR="${HYTALE_DIR:-}"
+BACKUP_DIR="${BACKUP_DIR:-}"
 HYTALE_SERVICE_NAME="${HYTALE_SERVICE_NAME:-}"
 HYTALE_SUDOERS_FILE="${HYTALE_SUDOERS_FILE:-/etc/sudoers.d/grate-bot-hytale}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
@@ -115,6 +117,35 @@ grant_bot_script_access() {
   done
 
   sudo -u "$BOT_USER" test -x "$script_path" || fail "$BOT_USER still cannot execute $script_path after applying ACLs"
+}
+
+grant_bot_directory_access() {
+  local dir_path="$1"
+  local parent
+  local child_dir
+
+  [[ "$dir_path" == /* ]] || fail "directory path must be absolute: $dir_path"
+  mkdir -p "$dir_path"
+
+  if sudo -u "$BOT_USER" test -r "$dir_path" && sudo -u "$BOT_USER" test -w "$dir_path" && sudo -u "$BOT_USER" test -x "$dir_path"; then
+    return 0
+  fi
+
+  if ! command -v setfacl >/dev/null 2>&1; then
+    fail "$BOT_USER cannot access $dir_path and setfacl is missing. Install acl/setfacl or move the Hytale directory under /srv or /opt with $BOT_USER access."
+  fi
+
+  log "Granting $BOT_USER access to $dir_path"
+  sudo setfacl -R -m "u:$BOT_USER:rwx" "$dir_path"
+  while IFS= read -r -d '' child_dir; do
+    sudo setfacl -m "d:u:$BOT_USER:rwx" "$child_dir"
+  done < <(find "$dir_path" -type d -print0)
+
+  parent="$(dirname "$dir_path")"
+  while [[ "$parent" != "/" ]]; do
+    sudo setfacl -m "u:$BOT_USER:--x" "$parent"
+    parent="$(dirname "$parent")"
+  done
 }
 
 shell_quote_env_value() {
@@ -247,6 +278,8 @@ Environment overrides:
   HYTALE_MANAGE_SCRIPT         default: this repo's deploy/hytale-manage.sh
   HYTALE_DOWNLOADER_UPDATE_SCRIPT
                                default: this repo's deploy/hytale-downloader-update.sh
+  HYTALE_DIR                   default: the deploy user's ~/hytale
+  BACKUP_DIR                   default: the deploy user's ~/hytale-backups
   HYTALE_SERVICE_NAME          default: hytale-server.service
   HYTALE_SUDOERS_FILE          default: /etc/sudoers.d/grate-bot-hytale
   SKIP_GIT_PULL=1              do not git checkout/pull
@@ -268,6 +301,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 need_cmd cargo
+need_cmd find
 need_cmd git
 need_cmd install
 need_cmd sudo
@@ -345,6 +379,22 @@ if [[ "$SKIP_HYTALE_SCRIPT_CONFIG" != "1" ]]; then
     log "Setting HYTALE_UPDATE_COMMAND to the migrated repo updater"
     upsert_env_file_shell_value HYTALE_UPDATE_COMMAND "$HYTALE_DOWNLOADER_UPDATE_SCRIPT update"
   fi
+
+  if [[ -z "$HYTALE_DIR" ]]; then
+    HYTALE_DIR="$(env_file_simple_value HYTALE_DIR || true)"
+  fi
+  HYTALE_DIR="${HYTALE_DIR:-$HOME/hytale}"
+  grant_bot_directory_access "$HYTALE_DIR"
+  log "Pointing HYTALE_DIR at $HYTALE_DIR"
+  upsert_env_file_value HYTALE_DIR "$HYTALE_DIR"
+
+  if [[ -z "$BACKUP_DIR" ]]; then
+    BACKUP_DIR="$(env_file_simple_value BACKUP_DIR || true)"
+  fi
+  BACKUP_DIR="${BACKUP_DIR:-$HOME/hytale-backups}"
+  grant_bot_directory_access "$BACKUP_DIR"
+  log "Pointing BACKUP_DIR at $BACKUP_DIR"
+  upsert_env_file_value BACKUP_DIR "$BACKUP_DIR"
 else
   log "Skipping Hytale manage script env config"
 fi
