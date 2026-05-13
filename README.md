@@ -39,6 +39,7 @@ Full Grateic Phone rules, setup options, modes, canvas settings, and validation 
 | `/grate hytale help` | Explain Hytale commands, settings, permissions, operations flow, and troubleshooting. |
 | `/grate hytale status` | Check the Hytale service status. |
 | `/grate hytale logs` | Show recent service logs. |
+| `/grate hytale diagnose` | Show service, UDP listener, config, and log diagnostics. |
 | `/grate hytale start` | Start the Hytale service. |
 | `/grate hytale stop` | Stop the Hytale service. |
 | `/grate hytale restart` | Restart the Hytale service. |

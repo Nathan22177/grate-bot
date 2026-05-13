@@ -134,6 +134,7 @@ fn default_manage_script() -> PathBuf {
         "start",
         "stop",
         "restart",
+        "diagnose",
         "check_update",
         "update"
     )
@@ -193,6 +194,14 @@ async fn stop(ctx: Context<'_>) -> Result<(), Error> {
 )]
 async fn restart(ctx: Context<'_>) -> Result<(), Error> {
     run_hytale_command(ctx, HytaleScriptAction::Restart).await
+}
+
+#[poise::command(
+    slash_command,
+    description_localized("en-US", "Show Hytale service, UDP listener, and log diagnostics")
+)]
+async fn diagnose(ctx: Context<'_>) -> Result<(), Error> {
+    run_hytale_command(ctx, HytaleScriptAction::Diagnose).await
 }
 
 #[poise::command(
@@ -298,18 +307,20 @@ enum HytaleScriptAction {
     Start,
     Stop,
     Restart,
+    Diagnose,
     CheckUpdate,
     Update,
 }
 
 impl HytaleScriptAction {
     #[cfg(test)]
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Status,
         Self::Logs,
         Self::Start,
         Self::Stop,
         Self::Restart,
+        Self::Diagnose,
         Self::CheckUpdate,
         Self::Update,
     ];
@@ -321,6 +332,7 @@ impl HytaleScriptAction {
             Self::Start => "start",
             Self::Stop => "stop",
             Self::Restart => "restart",
+            Self::Diagnose => "diagnose",
             Self::CheckUpdate => "check-update",
             Self::Update => "update",
         }
@@ -329,14 +341,20 @@ impl HytaleScriptAction {
     fn timeout(self, config: &HytaleConfig) -> Duration {
         match self {
             Self::CheckUpdate | Self::Update => config.download_timeout,
-            Self::Status | Self::Logs | Self::Start | Self::Stop | Self::Restart => {
-                config.command_timeout
-            }
+            Self::Status
+            | Self::Logs
+            | Self::Start
+            | Self::Stop
+            | Self::Restart
+            | Self::Diagnose => config.command_timeout,
         }
     }
 
     fn shows_human_output(self) -> bool {
-        matches!(self, Self::Status | Self::Logs | Self::CheckUpdate)
+        matches!(
+            self,
+            Self::Status | Self::Logs | Self::Diagnose | Self::CheckUpdate
+        )
     }
 }
 
@@ -616,6 +634,7 @@ fn final_output_response(action: HytaleScriptAction, output: &ScriptOutput) -> S
     let title = match action {
         HytaleScriptAction::Status => "Hytale status",
         HytaleScriptAction::Logs => "Recent Hytale server logs",
+        HytaleScriptAction::Diagnose => "Hytale diagnostics",
         HytaleScriptAction::CheckUpdate => "Hytale update check",
         _ => "Hytale output",
     };
@@ -703,16 +722,16 @@ fn hytale_help_text(topic: HytaleHelpTopicChoice) -> &'static str {
             "Hytale help: these commands let trusted server helpers check, manage, and update the hosted Hytale server.\n\nUse the `topic` option on `/grate hytale help` for focused help: `commands`, `settings`, `permissions`, `operations flow`, or `troubleshooting`.\n\nDefault behavior: the bot calls `~/hytale/hytale-manage.sh`, manages `hytale-server.service`, waits up to 15 seconds for regular commands, and waits up to 1800 seconds for update checks and updates unless the bot owner configured different environment variables. All management commands require the Hytale manager role."
         }
         HytaleHelpTopicChoice::Commands => {
-            "Hytale commands:\n`/grate hytale help`: explain commands, settings, permissions, and troubleshooting.\n`/grate hytale status`: checks the service status using the management script.\n`/grate hytale logs`: shows recent service logs using the management script.\n`/grate hytale start`: starts the server.\n`/grate hytale stop`: stops the server.\n`/grate hytale restart`: restarts the server.\n`/grate hytale check-update`: checks whether a server update is available without applying it.\n`/grate hytale update`: stops the server if needed, updates it, and starts it again.\n\nAll operational commands are ephemeral and require the configured manager role."
+            "Hytale commands:\n`/grate hytale help`: explain commands, settings, permissions, and troubleshooting.\n`/grate hytale status`: checks the service status using the management script.\n`/grate hytale logs`: shows recent service logs using the management script.\n`/grate hytale diagnose`: shows service, UDP listener, bind/config, and recent log diagnostics.\n`/grate hytale start`: starts the server.\n`/grate hytale stop`: stops the server.\n`/grate hytale restart`: restarts the server.\n`/grate hytale check-update`: checks whether a server update is available without applying it.\n`/grate hytale update`: stops the server if needed, updates it, and starts it again.\n\nAll operational commands are ephemeral and require the configured manager role."
         }
         HytaleHelpTopicChoice::Settings => {
             "Hytale settings for the bot owner:\n`HYTALE_MANAGER_ROLE_ID`: required Discord role ID allowed to use Hytale controls.\n`HYTALE_MANAGE_SCRIPT`: optional path to `hytale-manage.sh`. Defaults to `~/hytale/hytale-manage.sh`.\n`HYTALE_SERVICE_NAME`: optional systemd service name passed to the script as `SERVICE_NAME`. Defaults to `hytale-server.service`.\n`HYTALE_COMMAND_TIMEOUT_SECONDS`: optional timeout for status, logs, start, stop, and restart. Defaults to 15 seconds, with a minimum of 1 second.\n`HYTALE_DOWNLOAD_TIMEOUT_SECONDS`: optional timeout for `/grate hytale check-update` and `/grate hytale update`, also passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`. Defaults to 1800 seconds, with a minimum of 1 second.\n\nIf the required role ID is missing or invalid, management commands explain the setup problem instead of running."
         }
         HytaleHelpTopicChoice::Permissions => {
-            "Hytale permissions:\nOnly members with the configured Hytale manager role can run `status`, `logs`, `start`, `stop`, `restart`, `check-update`, or `update`.\n\nThe bot only calls the configured `hytale-manage.sh` script with one of those fixed actions. The script handles systemd, logs, sudo, and update work on the host.\n\nThe help command is available without the manager role so people can discover how the controls work."
+            "Hytale permissions:\nOnly members with the configured Hytale manager role can run `status`, `logs`, `diagnose`, `start`, `stop`, `restart`, `check-update`, or `update`.\n\nThe bot only calls the configured `hytale-manage.sh` script with one of those fixed actions. The script handles systemd, logs, sudo, and update work on the host.\n\nThe help command is available without the manager role so people can discover how the controls work."
         }
         HytaleHelpTopicChoice::OperationsFlow => {
-            "Typical Hytale operations flow:\n1. Run `/grate hytale status` to see whether the service is active or failed.\n2. If players report issues, run `/grate hytale logs` and scan recent output.\n3. Use `/grate hytale start` only when the server is stopped.\n4. Use `/grate hytale restart` when the server is wedged and logs/status suggest a restart is appropriate.\n5. Use `/grate hytale stop` when intentionally taking the server offline.\n6. Use `/grate hytale check-update` to see whether a new server build is available.\n7. Use `/grate hytale update` when applying a new server build.\n8. Re-check `/grate hytale status` after start, stop, restart, or update."
+            "Typical Hytale operations flow:\n1. Run `/grate hytale status` to see whether the service is active or failed.\n2. If players report issues, run `/grate hytale logs` and scan recent output.\n3. Use `/grate hytale diagnose` when the service is active but clients cannot connect.\n4. Use `/grate hytale start` only when the server is stopped.\n5. Use `/grate hytale restart` when the server is wedged and logs/status suggest a restart is appropriate.\n6. Use `/grate hytale stop` when intentionally taking the server offline.\n7. Use `/grate hytale check-update` to see whether a new server build is available.\n8. Use `/grate hytale update` when applying a new server build.\n9. Re-check `/grate hytale status` after start, stop, restart, or update."
         }
         HytaleHelpTopicChoice::Troubleshooting => {
             "Hytale troubleshooting:\nIf commands say controls are not set up, the bot owner needs to set `HYTALE_MANAGER_ROLE_ID`.\nIf you lack permission, ask for the configured Hytale manager role.\nIf a command fails to start, check `HYTALE_MANAGE_SCRIPT` and make sure the script exists and is executable by the bot user.\nIf a script action fails, check host sudoers, systemd permissions, journal access, and the script output shown in Discord.\nIf update waits for auth, complete the Hytale downloader authorization flow on the host.\nIf output is trimmed, use host access for deeper investigation; Discord replies intentionally cap long command output."
@@ -849,6 +868,7 @@ mod tests {
                 vec!["start".to_owned()],
                 vec!["stop".to_owned()],
                 vec!["restart".to_owned()],
+                vec!["diagnose".to_owned()],
                 vec!["check-update".to_owned()],
                 vec!["update".to_owned()],
             ]

@@ -4,7 +4,11 @@ set -euo pipefail
 
 SERVICE_NAME="${SERVICE_NAME:-hytale-server.service}"
 DOWNLOAD_TIMEOUT_SECONDS="${DOWNLOAD_TIMEOUT_SECONDS:-1800}"
+START_TIMEOUT_SECONDS="${START_TIMEOUT_SECONDS:-120}"
+START_STABLE_SECONDS="${START_STABLE_SECONDS:-10}"
 HYTALE_UPDATE_SCRIPT="${HYTALE_UPDATE_SCRIPT:-}"
+HYTALE_DIR="${HYTALE_DIR:-$HOME/hytale}"
+HYTALE_PORT="${HYTALE_PORT:-5520}"
 LOG_LINES="${LOG_LINES:-80}"
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,6 +55,71 @@ need_update_script() {
   }
 }
 
+print_service_diagnostics() {
+  sudo -n systemctl status "$SERVICE_NAME" --no-pager || true
+  sudo -n journalctl -u "$SERVICE_NAME" -n "$LOG_LINES" --no-pager || true
+}
+
+print_diagnostics() {
+  printf '== service ==\n'
+  sudo -n systemctl status "$SERVICE_NAME" --no-pager || true
+
+  printf '\n== udp listeners ==\n'
+  if command -v ss >/dev/null 2>&1; then
+    if ! sudo -n ss -H -lunp | grep -E "(:|\\*)${HYTALE_PORT}\\b|hytale|java"; then
+      printf 'No UDP listener matched port %s, hytale, or java.\n' "$HYTALE_PORT"
+      printf 'All UDP listeners:\n'
+      sudo -n ss -H -lunp || true
+    fi
+  else
+    printf 'ss is not installed; cannot inspect UDP listeners.\n'
+  fi
+
+  printf '\n== hytale config hints ==\n'
+  if [[ -f "$HYTALE_DIR/Server/config.json" ]]; then
+    grep -E '"(bind|port|address|host)"' "$HYTALE_DIR/Server/config.json" || true
+  else
+    printf 'No config file found at %s/Server/config.json\n' "$HYTALE_DIR"
+  fi
+
+  printf '\n== recent logs ==\n'
+  sudo -n journalctl -u "$SERVICE_NAME" -n "$LOG_LINES" --no-pager || true
+
+  printf '\n== quic note ==\n'
+  printf 'Hytale client connections use QUIC over UDP. If the service is active and listening, verify host firewall and cloud security rules allow UDP %s inbound to this server.\n' "$HYTALE_PORT"
+}
+
+wait_for_service_ready() {
+  local stage="$1"
+  local waited=0
+  local stable=0
+
+  while (( waited < START_TIMEOUT_SECONDS )); do
+    if systemctl is-failed --quiet "$SERVICE_NAME"; then
+      progress "$stage" failed "$SERVICE_NAME entered failed state"
+      print_service_diagnostics
+      return 1
+    fi
+
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+      stable=$((stable + 2))
+      if (( stable >= START_STABLE_SECONDS )); then
+        progress "$stage" completed "$SERVICE_NAME stayed active for ${START_STABLE_SECONDS}s"
+        return 0
+      fi
+    else
+      stable=0
+    fi
+
+    sleep 2
+    waited=$((waited + 2))
+  done
+
+  progress "$stage" failed "$SERVICE_NAME did not stay active within ${START_TIMEOUT_SECONDS}s"
+  print_service_diagnostics
+  return 1
+}
+
 action="${1:-}"
 
 case "$action" in
@@ -58,12 +127,15 @@ case "$action" in
     sudo -n systemctl status "$SERVICE_NAME" --no-pager
     ;;
   logs)
-    journalctl -u "$SERVICE_NAME" -n "$LOG_LINES" --no-pager
+    sudo -n journalctl -u "$SERVICE_NAME" -n "$LOG_LINES" --no-pager
+    ;;
+  diagnose)
+    print_diagnostics
     ;;
   start)
     progress start running "starting $SERVICE_NAME"
     sudo -n systemctl start "$SERVICE_NAME"
-    progress start completed "$SERVICE_NAME started"
+    wait_for_service_ready start
     ;;
   stop)
     progress stop running "stopping $SERVICE_NAME"
@@ -73,7 +145,7 @@ case "$action" in
   restart)
     progress restart running "restarting $SERVICE_NAME"
     sudo -n systemctl restart "$SERVICE_NAME"
-    progress restart completed "$SERVICE_NAME restarted"
+    wait_for_service_ready restart
     ;;
   check-update)
     need_update_script check-update
@@ -107,10 +179,10 @@ case "$action" in
 
     progress update running "starting $SERVICE_NAME after update"
     sudo -n systemctl start "$SERVICE_NAME"
-    progress update completed "$SERVICE_NAME updated and started"
+    wait_for_service_ready update
     ;;
   *)
-    printf 'Usage: %s {status|logs|start|stop|restart|check-update|update}\n' "$0" >&2
+    printf 'Usage: %s {status|logs|diagnose|start|stop|restart|check-update|update}\n' "$0" >&2
     exit 2
     ;;
 esac

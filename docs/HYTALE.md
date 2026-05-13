@@ -9,6 +9,7 @@ Hytale management lets trusted Discord helpers check, manage, and update a co-ho
 | `/grate hytale help` | Explain Hytale commands, settings, permissions, operations flow, and troubleshooting. |
 | `/grate hytale status` | Check the Hytale service status. |
 | `/grate hytale logs` | Show recent service logs. |
+| `/grate hytale diagnose` | Show service, UDP listener, config, and log diagnostics. |
 | `/grate hytale start` | Start the Hytale service. |
 | `/grate hytale stop` | Stop the Hytale service. |
 | `/grate hytale restart` | Restart the Hytale service. |
@@ -29,6 +30,7 @@ The bot only passes one of these fixed action arguments:
 
 - `status`
 - `logs`
+- `diagnose`
 - `start`
 - `stop`
 - `restart`
@@ -52,6 +54,7 @@ The bot streams JSON progress states back to Discord and includes trimmed non-JS
 | `HYTALE_MANAGER_ROLE_ID` | Required | Discord role allowed to use Hytale management commands. |
 | `HYTALE_MANAGE_SCRIPT` | `~/hytale/hytale-manage.sh` | Path to the management script. |
 | `HYTALE_SERVICE_NAME` | `hytale-server.service` | Service name passed to the script as `SERVICE_NAME`. |
+| `HYTALE_PORT` | `5520` | UDP port shown in diagnostics; set this if the server uses a custom `--bind` port. |
 | `HYTALE_COMMAND_TIMEOUT_SECONDS` | `15` | Timeout for status, logs, start, stop, and restart; minimum `1`. |
 | `HYTALE_DOWNLOAD_TIMEOUT_SECONDS` | `1800` | Timeout for `/grate hytale check-update` and `/grate hytale update`; also passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`; minimum `1`. |
 
@@ -61,12 +64,13 @@ The bot streams JSON progress states back to Discord and includes trimmed non-JS
 
 1. Run `/grate hytale status`.
 2. If players report issues, run `/grate hytale logs`.
-3. Use `/grate hytale start` only when the service is stopped.
-4. Use `/grate hytale restart` when status/logs suggest the service is wedged.
-5. Use `/grate hytale stop` when intentionally taking the server offline.
-6. Use `/grate hytale check-update` to see whether a new server build is available.
-7. Use `/grate hytale update` when applying a new server build.
-8. Re-check `/grate hytale status`.
+3. Use `/grate hytale diagnose` when the service is active but clients cannot connect.
+4. Use `/grate hytale start` only when the service is stopped.
+5. Use `/grate hytale restart` when status/logs suggest the service is wedged.
+6. Use `/grate hytale stop` when intentionally taking the server offline.
+7. Use `/grate hytale check-update` to see whether a new server build is available.
+8. Use `/grate hytale update` when applying a new server build.
+9. Re-check `/grate hytale status`.
 
 ## Check Update Behavior
 
@@ -119,6 +123,8 @@ Deploy also seeds `HYTALE_DIR` to the deploy user's `~/hytale` and `BACKUP_DIR` 
 
 The scripts use `sudo -n`, so the bot's host user needs passwordless sudo for the commands the scripts run. If Discord shows `sudo: a password is required`, the sudoers entry is missing or does not match the command path/service name. It also needs permission to read service logs with `journalctl`; on Ubuntu, that usually means membership in a journal-reading group such as `systemd-journal`.
 
+After start, restart, and update, `hytale-manage.sh` waits for the service to remain active before reporting success. This verifies systemd startup, but it does not prove external clients can complete a QUIC handshake. Hytale uses QUIC over UDP, so connection failures after a healthy start usually need server logs plus UDP bind/firewall checks for port `5520` or the custom `--bind` port.
+
 Deployment and service setup details live in [../MAINTAINER_SETUP.md](../MAINTAINER_SETUP.md).
 
 ## Troubleshooting
@@ -128,5 +134,6 @@ Deployment and service setup details live in [../MAINTAINER_SETUP.md](../MAINTAI
 - If a command fails to start, check `HYTALE_MANAGE_SCRIPT` and make sure the script exists and is executable by the bot user. For repo paths under `/home/ubuntu`, deploy should install `acl` and grant access automatically; if apt is misconfigured or blocked, move the checkout under `/srv/grate-bot` or `/opt/grate-bot`.
 - If a script action fails with `sudo: a password is required`, configure passwordless sudo for the bot host user and verify it with `sudo -u BOT_USER sudo -n systemctl status hytale-server.service --no-pager`.
 - If a script action fails for another reason, check host sudoers, systemd permissions, journal access, and the script output shown in Discord.
+- If update reports success but clients get `QUIC handshake failed`, run `/grate hytale logs`, confirm the service stayed active, and verify UDP traffic is allowed for port `5520` or the custom Hytale bind port.
 - If update waits for auth, complete the Hytale downloader authorization flow on the host.
 - If output is trimmed, use host access for deeper investigation.
