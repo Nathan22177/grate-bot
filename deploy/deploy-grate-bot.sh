@@ -563,6 +563,13 @@ sudo install -o "$BOT_USER" -g "$BOT_GROUP" -m 0755 \
 
 log "Starting $SERVICE_NAME"
 sudo systemctl start "$SERVICE_NAME"
+sleep 3
+if ! sudo systemctl is-active --quiet "$SERVICE_NAME"; then
+  log "$SERVICE_NAME did not stay active after start"
+  sudo systemctl status "$SERVICE_NAME" --no-pager || true
+  sudo journalctl -u "$SERVICE_NAME" -n 80 --no-pager || true
+  fail "$SERVICE_NAME failed after start"
+fi
 
 log "Service status"
 sudo systemctl status "$SERVICE_NAME" --no-pager
