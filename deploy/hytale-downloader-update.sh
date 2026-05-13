@@ -70,6 +70,20 @@ require_cmd() {
   fi
 }
 
+ensure_executable() {
+  local path="$1"
+
+  if [[ -x "$path" ]]; then
+    return
+  fi
+
+  if chmod +x "$path" 2>/dev/null; then
+    return
+  fi
+
+  sudo_cmd chmod +x "$path"
+}
+
 service_active() {
   systemctl is-active --quiet "$SERVICE_NAME"
 }
@@ -148,7 +162,7 @@ download_downloader() {
     unzip -o hytale-downloader.zip
   fi
 
-  chmod +x hytale-downloader-linux-amd64
+  ensure_executable hytale-downloader-linux-amd64
   report_stage downloader completed "downloader is ready"
 }
 
@@ -269,7 +283,7 @@ extract_latest_zip() {
 
   report_stage extract running "extracting $zip_name"
   unzip -o "$HTYALE_DIR/$zip_name" -d "$HTYALE_DIR"
-  chmod +x "$HTYALE_DIR/start.sh"
+  ensure_executable "$HTYALE_DIR/start.sh"
   report_stage extract completed "extracted $zip_name"
 }
 
@@ -281,7 +295,7 @@ restore_server_state() {
 
   report_stage restore running "restoring mutable server state from $(basename "$BACKUP_ARCHIVE_PATH")"
   tar -C "$HTYALE_DIR" -xzf "$BACKUP_ARCHIVE_PATH"
-  chmod +x "$HTYALE_DIR/start.sh"
+  ensure_executable "$HTYALE_DIR/start.sh"
   report_stage restore completed "mutable server state restored"
 }
 
