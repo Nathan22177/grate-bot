@@ -915,14 +915,14 @@ fn extract_public_ip(response: &str) -> Result<String, Error> {
 }
 
 fn format_hytale_join_message(public_ip: &str, password: &HytalePasswordSettings) -> String {
-    let mut message = format!("Address\n{}", code_block(public_ip));
+    let mut message = format!("Address:\n{}", code_block(public_ip));
     if password.password_enabled
         && let Some(password) = password
             .last_password
             .as_deref()
             .filter(|password| !password.is_empty())
     {
-        message.push_str(&format!("\nPassword\n{}", code_block(password)));
+        message.push_str(&format!("\nPassword:\n{}", code_block(password)));
     }
     message
 }
@@ -943,6 +943,16 @@ async fn write_hytale_password_config(
 ) -> Result<(), Error> {
     let mut config = read_hytale_server_config(hytale_dir).await?;
     let object = ensure_json_object(&mut config);
+    object.insert(
+        "Password".to_owned(),
+        Value::String(
+            password
+                .password_enabled
+                .then(|| password.last_password.clone())
+                .flatten()
+                .unwrap_or_default(),
+        ),
+    );
     object.insert(
         "GrateBot".to_owned(),
         serde_json::json!({
@@ -1387,7 +1397,7 @@ mod tests {
         };
         assert_eq!(
             format_hytale_join_message("203.0.113.10", &disabled),
-            "Address\n```text\n203.0.113.10\n```"
+            "Address:\n```text\n203.0.113.10\n```"
         );
 
         let enabled = HytalePasswordSettings {
@@ -1396,7 +1406,7 @@ mod tests {
         };
         assert_eq!(
             format_hytale_join_message("203.0.113.10", &enabled),
-            "Address\n```text\n203.0.113.10\n```\nPassword\n```text\nsec`ret\n```"
+            "Address:\n```text\n203.0.113.10\n```\nPassword:\n```text\nsec`ret\n```"
         );
     }
 
@@ -1429,7 +1439,7 @@ mod tests {
         tokio::fs::create_dir_all(&server_dir).await.unwrap();
         tokio::fs::write(
             &config_path,
-            r#"{"bind_port":5520,"nested":{"keep":true},"GrateBot":{"password_enabled":false,"password":"old"}}"#,
+            r#"{"bind_port":5520,"Password":"","nested":{"keep":true},"GrateBot":{"password_enabled":false,"password":"old"}}"#,
         )
         .await
         .unwrap();
@@ -1446,11 +1456,29 @@ mod tests {
 
         let config = read_hytale_server_config(&root).await.unwrap();
         assert_eq!(config["bind_port"], serde_json::json!(5520));
+        assert_eq!(config["Password"], serde_json::json!("new-pass"));
         assert_eq!(config["nested"]["keep"], serde_json::json!(true));
         assert_eq!(
             config["GrateBot"]["password_enabled"],
             serde_json::json!(true)
         );
+        assert_eq!(
+            config["GrateBot"]["password"],
+            serde_json::json!("new-pass")
+        );
+
+        write_hytale_password_config(
+            &root,
+            &HytalePasswordSettings {
+                password_enabled: false,
+                last_password: Some("new-pass".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let config = read_hytale_server_config(&root).await.unwrap();
+        assert_eq!(config["Password"], serde_json::json!(""));
         assert_eq!(
             config["GrateBot"]["password"],
             serde_json::json!("new-pass")

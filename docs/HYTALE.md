@@ -62,7 +62,7 @@ The bot streams JSON progress states back to Discord and includes trimmed non-JS
 
 `HYTALE_COMMAND_TIMEOUT_SECONDS` intentionally stays short for normal management commands. Long update and download work uses `HYTALE_DOWNLOAD_TIMEOUT_SECONDS`.
 
-Password commands preserve unknown `Server/config.json` fields and write bot-managed password state under `GrateBot`. `/grate hytale join` resolves the host public IP with `https://api.getpublicip.com/ip`, prints only the IP address plus password when enabled, and remembers the last successful IP in `grate-bot-settings.json` so join info can still work if the lookup is temporarily unavailable.
+Password commands preserve unknown `Server/config.json` fields, write Hytale's top-level `Password` field for server enforcement, and keep bot-managed password state under `GrateBot`. Disabling password protection leaves the remembered password under `GrateBot` but clears Hytale's `Password` field to `""`. `/grate hytale join` resolves the host public IP with `https://api.getpublicip.com/ip`, prints only the IP address plus password when enabled, and remembers the last successful IP in `grate-bot-settings.json` so join info can still work if the lookup is temporarily unavailable.
 
 ## Operations Flow
 
