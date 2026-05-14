@@ -24,7 +24,6 @@ type Error = anyhow::Error;
 const DEFAULT_SERVICE_NAME: &str = "hytale-server.service";
 const DEFAULT_COMMAND_TIMEOUT_SECONDS: u64 = 15;
 const DEFAULT_DOWNLOAD_TIMEOUT_SECONDS: u64 = 1_800;
-const DEFAULT_HYTALE_PORT: u16 = 5_520;
 const MAX_RESPONSE_CHARS: usize = 1_750;
 
 #[derive(Debug, Clone, Copy, poise::ChoiceParameter)]
@@ -201,12 +200,8 @@ async fn join(ctx: Context<'_>) -> Result<(), Error> {
     let public_ip = public_ip_for_join(ctx, guild_id.get()).await?;
     let password = ctx.data().settings.hytale_password(guild_id.get()).await;
 
-    ctx.say(format_hytale_join_message(
-        &public_ip,
-        DEFAULT_HYTALE_PORT,
-        &password,
-    ))
-    .await?;
+    ctx.say(format_hytale_join_message(&public_ip, &password))
+        .await?;
     Ok(())
 }
 
@@ -899,25 +894,35 @@ async fn fetch_public_ip() -> Result<String, Error> {
         .text()
         .await
         .context("could not read public Hytale server IP response")?;
-    let ip = ip_text.trim();
-    ip.parse::<IpAddr>()
-        .with_context(|| format!("public IP lookup returned an invalid IP address: {ip}"))?;
-    Ok(ip.to_owned())
+    extract_public_ip(&ip_text)
 }
 
-fn format_hytale_join_message(
-    public_ip: &str,
-    port: u16,
-    password: &HytalePasswordSettings,
-) -> String {
-    let mut message = format!("Hytale server\nAddress: `{public_ip}:{port}`");
+fn extract_public_ip(response: &str) -> Result<String, Error> {
+    response
+        .split(|character: char| !(character.is_ascii_hexdigit() || matches!(character, '.' | ':')))
+        .find_map(|candidate| {
+            candidate
+                .parse::<IpAddr>()
+                .ok()
+                .map(|_| candidate.to_owned())
+        })
+        .with_context(|| {
+            format!(
+                "public IP lookup response did not contain an IP address: {}",
+                truncate_inline(response.trim(), 200)
+            )
+        })
+}
+
+fn format_hytale_join_message(public_ip: &str, password: &HytalePasswordSettings) -> String {
+    let mut message = format!("Address\n{}", code_block(public_ip));
     if password.password_enabled
         && let Some(password) = password
             .last_password
             .as_deref()
             .filter(|password| !password.is_empty())
     {
-        message.push_str(&format!("\nPassword: `{}`", password.replace('`', "'")));
+        message.push_str(&format!("\nPassword\n{}", code_block(password)));
     }
     message
 }
@@ -1381,8 +1386,8 @@ mod tests {
             last_password: Some("secret".to_owned()),
         };
         assert_eq!(
-            format_hytale_join_message("203.0.113.10", 5520, &disabled),
-            "Hytale server\nAddress: `203.0.113.10:5520`"
+            format_hytale_join_message("203.0.113.10", &disabled),
+            "Address\n```text\n203.0.113.10\n```"
         );
 
         let enabled = HytalePasswordSettings {
@@ -1390,8 +1395,27 @@ mod tests {
             last_password: Some("sec`ret".to_owned()),
         };
         assert_eq!(
-            format_hytale_join_message("203.0.113.10", 5520, &enabled),
-            "Hytale server\nAddress: `203.0.113.10:5520`\nPassword: `sec'ret`"
+            format_hytale_join_message("203.0.113.10", &enabled),
+            "Address\n```text\n203.0.113.10\n```\nPassword\n```text\nsec`ret\n```"
+        );
+    }
+
+    #[test]
+    fn extracts_public_ip_from_plain_or_labeled_lookup_response() {
+        assert_eq!(
+            extract_public_ip("141.147.34.215").unwrap(),
+            "141.147.34.215"
+        );
+        assert_eq!(
+            extract_public_ip(
+                "IP Address: 141.147.34.215\nISP: Oracle Corporation\nCity: Frankfurt am Main\nCountry: Germany"
+            )
+            .unwrap(),
+            "141.147.34.215"
+        );
+        assert_eq!(
+            extract_public_ip("Public IP: 2001:db8::1").unwrap(),
+            "2001:db8::1"
         );
     }
 
