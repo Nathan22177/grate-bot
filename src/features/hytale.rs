@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 use serenity::RoleId;
 use std::{
     net::IpAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
     time::Duration,
 };
@@ -920,19 +920,18 @@ fn format_hytale_join_message(
     password: &HytalePasswordSettings,
 ) -> String {
     let mut message = format!("Hytale server\nAddress: `{public_ip}:{port}`");
-    if password.password_enabled {
-        if let Some(password) = password
+    if password.password_enabled
+        && let Some(password) = password
             .last_password
             .as_deref()
             .filter(|password| !password.is_empty())
-        {
-            message.push_str(&format!("\nPassword: `{}`", password.replace('`', "'")));
-        }
+    {
+        message.push_str(&format!("\nPassword: `{}`", password.replace('`', "'")));
     }
     message
 }
 
-async fn read_hytale_server_config(hytale_dir: &PathBuf) -> Result<Value, Error> {
+async fn read_hytale_server_config(hytale_dir: &Path) -> Result<Value, Error> {
     let path = hytale_config_path(hytale_dir);
     match tokio::fs::read_to_string(&path).await {
         Ok(contents) => serde_json::from_str(&contents)
@@ -943,7 +942,7 @@ async fn read_hytale_server_config(hytale_dir: &PathBuf) -> Result<Value, Error>
 }
 
 async fn write_hytale_password_config(
-    hytale_dir: &PathBuf,
+    hytale_dir: &Path,
     password: &HytalePasswordSettings,
 ) -> Result<(), Error> {
     let mut config = read_hytale_server_config(hytale_dir).await?;
@@ -983,7 +982,7 @@ fn ensure_json_object(value: &mut Value) -> &mut Map<String, Value> {
         .expect("value was just made an object")
 }
 
-fn hytale_config_path(hytale_dir: &PathBuf) -> PathBuf {
+fn hytale_config_path(hytale_dir: &Path) -> PathBuf {
     hytale_dir.join("Server/config.json")
 }
 
