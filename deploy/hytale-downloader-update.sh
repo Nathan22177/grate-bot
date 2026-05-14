@@ -62,8 +62,6 @@ on_error() {
   fi
 }
 
-trap on_error EXIT
-
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     fail "missing required command: $1"
@@ -234,13 +232,20 @@ local_server_version() {
 
   if [[ -f "$HTYALE_DIR/Server/HytaleServer.jar" ]]; then
     version="$(unzip -p "$HTYALE_DIR/Server/HytaleServer.jar" META-INF/MANIFEST.MF 2>/dev/null \
-      | grep -Eo '20[0-9]{2}\.[0-9]{2}\.[0-9]{2}-[0-9A-Za-z]+' \
-      | head -n 1 || true)"
+      | extract_server_version)"
     if [[ -n "$version" ]]; then
       printf '%s\n' "$version"
       return
     fi
   fi
+}
+
+server_version_pattern() {
+  printf '%s' '20[0-9]{2}\.[0-9]{2}\.[0-9]{2}-[0-9A-Za-z][0-9A-Za-z.-]*|[0-9]+(\.[0-9]+){2}(-[0-9A-Za-z][0-9A-Za-z.-]*)?'
+}
+
+extract_server_version() {
+  grep -Eo "$(server_version_pattern)" | tail -n 1 || true
 }
 
 latest_server_version() {
@@ -250,7 +255,7 @@ latest_server_version() {
   cd "$HTYALE_DIR"
   output="$(timeout --foreground "${DOWNLOAD_TIMEOUT_SECONDS}s" \
     ./hytale-downloader-linux-amd64 -patchline "$PATCHLINE" -print-version)"
-  version="$(grep -Eo '20[0-9]{2}\.[0-9]{2}\.[0-9]{2}-[0-9A-Za-z]+' <<<"$output" | tail -n 1 || true)"
+  version="$(extract_server_version <<<"$output")"
   if [[ -z "$version" ]]; then
     printf '%s\n' "$output" >&2
     fail "could not parse latest Hytale server version"
@@ -259,7 +264,7 @@ latest_server_version() {
 }
 
 latest_server_zip() {
-  find "$HTYALE_DIR" -maxdepth 1 -type f -name '20*.zip' ! -name 'hytale-downloader.zip' -printf '%T@ %f\n' \
+  find "$HTYALE_DIR" -maxdepth 1 -type f -name '*.zip' ! -name 'hytale-downloader.zip' -printf '%T@ %f\n' \
     | sort -nr \
     | awk 'NR==1 { print $2 }'
 }
@@ -403,15 +408,23 @@ update() {
   print_next_steps
 }
 
-case "${1:-update}" in
-  check-update)
-    check_update
-    ;;
-  update)
-    update
-    ;;
-  *)
-    printf 'Usage: %s {check-update|update}\n' "$0" >&2
-    exit 2
-    ;;
-esac
+main() {
+  trap on_error EXIT
+
+  case "${1:-update}" in
+    check-update)
+      check_update
+      ;;
+    update)
+      update
+      ;;
+    *)
+      printf 'Usage: %s {check-update|update}\n' "$0" >&2
+      exit 2
+      ;;
+  esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

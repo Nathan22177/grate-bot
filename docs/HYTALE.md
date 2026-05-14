@@ -7,6 +7,7 @@ Hytale management lets trusted Discord helpers check, manage, and update a co-ho
 | Command | Purpose |
 | --- | --- |
 | `/grate hytale help` | Explain Hytale commands, settings, permissions, operations flow, and troubleshooting. |
+| `/grate hytale join` | Print public server address and the active password when password protection is enabled. |
 | `/grate hytale status` | Check the Hytale service status. |
 | `/grate hytale logs` | Show recent service logs. |
 | `/grate hytale start` | Start the Hytale service. |
@@ -14,8 +15,11 @@ Hytale management lets trusted Discord helpers check, manage, and update a co-ho
 | `/grate hytale restart` | Restart the Hytale service. |
 | `/grate hytale check-update` | Check whether a Hytale server update is available without applying it. |
 | `/grate hytale update` | Update the Hytale server and restart it. |
+| `/grate hytale set channel` | Set the only channel where Hytale commands work. Manager role only. |
+| `/grate hytale set password` | Set and enable the Hytale server password. Manager role only. |
+| `/grate hytale toggle password` | Turn Hytale password protection on or off. Manager role only. |
 
-All operational Hytale command responses are ephemeral and require the configured Hytale manager role. `/grate hytale help` is available without that role so people can discover the setup and permission requirements.
+Operational Hytale command responses are ephemeral and require the configured Hytale manager role. `/grate hytale help` and `/grate hytale join` are available without that role so people can discover setup and join information. If `/grate hytale set channel` has been used, all Hytale commands only work in that configured channel. If the configured channel is deleted, the bot clears the setting on the next Hytale command and allows Hytale commands everywhere until a new channel is set.
 
 ## Script Contract
 
@@ -51,11 +55,14 @@ The bot streams JSON progress states back to Discord and includes trimmed non-JS
 | --- | --- | --- |
 | `HYTALE_MANAGER_ROLE_ID` | Required | Discord role allowed to use Hytale management commands. |
 | `HYTALE_MANAGE_SCRIPT` | `~/hytale/hytale-manage.sh` | Path to the management script. |
+| `HYTALE_DIR` | `~/hytale` | Hytale install directory containing `Server/config.json`. |
 | `HYTALE_SERVICE_NAME` | `hytale-server.service` | Service name passed to the script as `SERVICE_NAME`. |
 | `HYTALE_COMMAND_TIMEOUT_SECONDS` | `15` | Timeout for status, logs, start, stop, and restart; minimum `1`. |
 | `HYTALE_DOWNLOAD_TIMEOUT_SECONDS` | `1800` | Timeout for `/grate hytale check-update` and `/grate hytale update`; also passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`; minimum `1`. |
 
 `HYTALE_COMMAND_TIMEOUT_SECONDS` intentionally stays short for normal management commands. Long update and download work uses `HYTALE_DOWNLOAD_TIMEOUT_SECONDS`.
+
+Password commands preserve unknown `Server/config.json` fields and write bot-managed password state under `GrateBot`. `/grate hytale join` uses Hytale's default port `5520`, resolves the host public IP with `https://api.getpublicip.com/ip`, and remembers the last successful IP in `grate-bot-settings.json` so join info can still work if the lookup is temporarily unavailable.
 
 ## Operations Flow
 

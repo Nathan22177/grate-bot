@@ -155,6 +155,7 @@ HYTALE_MANAGER_ROLE_ID=123456789012345678
 Hytale settings:
 
 ```sh
+GRATE_BOT_SETTINGS_FILE=/path/to/grate-bot-settings.json
 HYTALE_SERVICE_NAME=hytale-server.service
 HYTALE_COMMAND_TIMEOUT_SECONDS=15
 HYTALE_DOWNLOAD_TIMEOUT_SECONDS=1800
@@ -179,6 +180,8 @@ sudo systemctl restart grate-bot.service
 ```
 
 Deploy also seeds `HYTALE_DIR` and `BACKUP_DIR` to the deploy user's home paths when they are missing, and grants the bot user ACL access to those directories.
+
+By default, bot channel/password settings and the cached Hytale public IP are stored in the ignored repo-local `grate-bot-settings.json`. Set `GRATE_BOT_SETTINGS_FILE` if systemd should keep those settings elsewhere.
 
 `HYTALE_COMMAND_TIMEOUT_SECONDS` is used for `/grate hytale status`, `logs`, `start`, `stop`, and `restart`. `HYTALE_DOWNLOAD_TIMEOUT_SECONDS` is used for `/grate hytale check-update` and `/grate hytale update` and is passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`. `START_TIMEOUT_SECONDS` and `START_STABLE_SECONDS` are used by `hytale-manage.sh` after start, restart, and update before reporting success. `HYTALE_CHECK_UPDATE_COMMAND` and `HYTALE_UPDATE_COMMAND` are used by `hytale-update.sh`; keep the check command read-only. The migrated downloader check runs `-print-version` for the configured patchline and compares it with the installed server version inferred from `HYTALE_DIR`.
 

@@ -6,7 +6,10 @@ use super::{
         SubmissionKind,
     },
 };
-use crate::bot::{Context, Data};
+use crate::{
+    bot::{Context, Data, ensure_command_channel},
+    settings::ChannelFamily,
+};
 use anyhow::anyhow;
 use poise::serenity_prelude as serenity;
 use serenity::{
@@ -135,7 +138,16 @@ pub enum HelpTopicChoice {
 
 #[poise::command(
     slash_command,
-    subcommands("help", "join", "ready", "start", "status", "cancel", "force_cancel")
+    subcommands(
+        "help",
+        "join",
+        "ready",
+        "start",
+        "status",
+        "cancel",
+        "force_cancel",
+        "set"
+    )
 )]
 pub async fn grateic(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
@@ -152,6 +164,10 @@ pub async fn create(
     #[description = "Require drawing uploads to match the canvas size exactly; defaults to true"]
     require_canvas_size: Option<bool>,
 ) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Grateic).await? {
+        return Ok(());
+    }
+
     let guild_id = guild_id_from_context(ctx)?;
     let key = game_key_from_context(ctx)?;
     let background_hex = background.hex(custom_background.as_deref())?;
@@ -208,6 +224,10 @@ async fn help(
     ctx: Context<'_>,
     #[description = "What to explain; defaults to overview"] topic: Option<HelpTopicChoice>,
 ) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Grateic).await? {
+        return Ok(());
+    }
+
     ctx.say(grateic_help_text(
         topic.unwrap_or(HelpTopicChoice::Overview),
     ))
@@ -218,6 +238,10 @@ async fn help(
 
 #[poise::command(slash_command)]
 async fn join(ctx: Context<'_>) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Grateic).await? {
+        return Ok(());
+    }
+
     let key = active_game_key_from_context(ctx).await?;
     let player_id = ctx.author().id.get();
 
@@ -237,6 +261,10 @@ async fn join(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(slash_command)]
 async fn ready(ctx: Context<'_>) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Grateic).await? {
+        return Ok(());
+    }
+
     let key = active_game_key_from_context(ctx).await?;
     let player_id = ctx.author().id.get();
 
@@ -289,6 +317,10 @@ async fn ready(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(slash_command)]
 async fn start(ctx: Context<'_>) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Grateic).await? {
+        return Ok(());
+    }
+
     let key = active_game_key_from_context(ctx).await?;
     let requester_id = ctx.author().id.get();
     let content = start_game(ctx.serenity_context(), ctx.data(), key, requester_id).await?;
@@ -307,6 +339,10 @@ async fn start(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(slash_command)]
 async fn status(ctx: Context<'_>) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Grateic).await? {
+        return Ok(());
+    }
+
     let key = active_game_key_from_context(ctx).await?;
 
     let response = {
@@ -334,6 +370,10 @@ async fn status(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(slash_command)]
 async fn cancel(ctx: Context<'_>) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Grateic).await? {
+        return Ok(());
+    }
+
     let key = active_game_key_from_context(ctx).await?;
     let requester_id = ctx.author().id.get();
 
@@ -362,6 +402,10 @@ async fn cancel(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(slash_command)]
 async fn force_cancel(ctx: Context<'_>) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Grateic).await? {
+        return Ok(());
+    }
+
     let key = active_game_key_from_context(ctx).await?;
     let requester_id = ctx.author().id.get();
 
@@ -377,6 +421,41 @@ async fn force_cancel(ctx: Context<'_>) -> Result<(), Error> {
     ctx.send(
         poise::CreateReply::default()
             .content("Grateic Phone game force-cancelled.")
+            .ephemeral(true),
+    )
+    .await?;
+    Ok(())
+}
+
+#[poise::command(slash_command, subcommands("set_channel"))]
+async fn set(_ctx: Context<'_>) -> Result<(), Error> {
+    Ok(())
+}
+
+#[poise::command(
+    slash_command,
+    rename = "channel",
+    description_localized("en-US", "Set the only channel where Grateic commands work")
+)]
+async fn set_channel(
+    ctx: Context<'_>,
+    #[description = "Channel where Grateic commands should work"] channel: serenity::GuildChannel,
+) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Grateic).await? {
+        return Ok(());
+    }
+
+    let guild_id = guild_id_from_context(ctx)?;
+    ctx.data()
+        .settings
+        .set_channel(guild_id, ChannelFamily::Grateic, channel.id.get())
+        .await?;
+    ctx.send(
+        poise::CreateReply::default()
+            .content(format!(
+                "Grateic commands now only work in <#{}>.",
+                channel.id.get()
+            ))
             .ephemeral(true),
     )
     .await?;
@@ -1539,7 +1618,7 @@ fn grateic_help_text(topic: HelpTopicChoice) -> &'static str {
             "Grateic Phone help: create a lobby with `/grate create`, then players use `/grate grateic join`, and the host uses `/grate grateic start`.\n\nUse the `topic` option on `/grate grateic help` for focused help: `commands`, `create settings`, `modes`, `game flow examples`, or `canvas size rule`.\n\nDefault behavior: `/grate create` requires a mode, preset, and background. `custom_background` is only needed for `custom hex`. `require_canvas_size` defaults to enabled, so drawing uploads must match the selected canvas size unless the host turns it off."
         }
         HelpTopicChoice::Commands => {
-            "Grateic Phone commands:\n`/grate create`: create a Grateic Phone lobby. Choose `mode`, `preset`, and `background`.\n`/grate grateic join`: join the active lobby in this server.\n`/grate grateic ready`: retry the DM check if the bot could not DM you.\n`/grate grateic start`: host-only; starts the active lobby after at least 2 players join.\n`/grate grateic status`: refresh lobby status before start, or privately show in-progress round status.\n`/grate grateic cancel`: host-only; cancel the active lobby before it starts.\n`/grate grateic force_cancel`: host-only; force-cancel a stuck active game.\n`/grate grateic help`: explain commands, settings, modes, and rules."
+            "Grateic Phone commands:\n`/grate create`: create a Grateic Phone lobby. Choose `mode`, `preset`, and `background`.\n`/grate grateic join`: join the active lobby in this server.\n`/grate grateic ready`: retry the DM check if the bot could not DM you.\n`/grate grateic start`: host-only; starts the active lobby after at least 2 players join.\n`/grate grateic status`: refresh lobby status before start, or privately show in-progress round status.\n`/grate grateic cancel`: host-only; cancel the active lobby before it starts.\n`/grate grateic force_cancel`: host-only; force-cancel a stuck active game.\n`/grate grateic set channel`: set the only channel where Grateic commands work.\n`/grate grateic help`: explain commands, settings, modes, and rules."
         }
         HelpTopicChoice::CreateSettings => {
             "`/grate create` settings:\n`mode`: `short` is one prompt plus one drawing. `full` is the full telephone-style chain game.\n`preset`: canvas size. `square` is 1024x1024, `portrait` is 1080x1920, `landscape` is 1920x1080.\n`background`: canvas background color preset. Choose `custom hex` only when you want your own color.\n`custom_background`: required only when `background` is `custom hex`; use `#RRGGBB`, like `#ff00aa`.\n`require_canvas_size`: optional. Defaults to `true`. When `false`, drawing uploads can use any image size."
