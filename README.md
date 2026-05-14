@@ -29,7 +29,7 @@ Use `/grate verify` to compare the running executable SHA-256 against the checks
 | `/grate grateic status` | Refresh lobby status before start, or privately show in-progress round status. |
 | `/grate grateic cancel` | Cancel the active lobby before it starts. Host only. |
 | `/grate grateic force_cancel` | Force-cancel a stuck active game. Host only. |
-| `/grate grateic set channel` | Set the only channel where Grateic commands work. |
+| `/grate grateic set-channel` | Set the only channel where Grateic commands work. |
 
 Full Grateic Phone rules, setup options, modes, canvas settings, and validation details live in [docs/GRATEIC.md](docs/GRATEIC.md).
 
@@ -46,9 +46,9 @@ Full Grateic Phone rules, setup options, modes, canvas settings, and validation 
 | `/grate hytale restart` | Restart the Hytale service. |
 | `/grate hytale check-update` | Check whether a Hytale server update is available without applying it. |
 | `/grate hytale update` | Update the Hytale server and restart it. |
-| `/grate hytale set channel` | Set the only channel where Hytale commands work. Manager role only. |
-| `/grate hytale set password` | Set and enable the Hytale server password. Manager role only. |
-| `/grate hytale toggle password` | Turn Hytale password protection on or off. Manager role only. |
+| `/grate hytale set-channel` | Set the only channel where Hytale commands work. Manager role only. |
+| `/grate hytale set-password` | Set and enable the Hytale server password. Manager role only. |
+| `/grate hytale toggle-password` | Turn Hytale password protection on or off. Manager role only. |
 
 Hytale management commands require the configured Hytale manager role. The feature overview, runtime settings, script contract, and operations flow live in [docs/HYTALE.md](docs/HYTALE.md).
 

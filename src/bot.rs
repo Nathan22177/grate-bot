@@ -51,12 +51,14 @@ pub async fn run() -> anyhow::Result<()> {
         .setup(|ctx, ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                println!("{} is online", ready.user.name);
 
-                Ok(Data {
+                let data = Data {
                     grateic: grateic_feature::State::default(),
                     settings: SettingsStore::load_from_env().await?,
-                })
+                };
+                println!("{} is online", ready.user.name);
+
+                Ok(data)
             })
         })
         .build();

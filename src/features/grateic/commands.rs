@@ -146,7 +146,7 @@ pub enum HelpTopicChoice {
         "status",
         "cancel",
         "force_cancel",
-        "set"
+        "set_channel"
     )
 )]
 pub async fn grateic(_ctx: Context<'_>) -> Result<(), Error> {
@@ -427,14 +427,9 @@ async fn force_cancel(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-#[poise::command(slash_command, subcommands("set_channel"))]
-async fn set(_ctx: Context<'_>) -> Result<(), Error> {
-    Ok(())
-}
-
 #[poise::command(
     slash_command,
-    rename = "channel",
+    rename = "set-channel",
     description_localized("en-US", "Set the only channel where Grateic commands work")
 )]
 async fn set_channel(
@@ -1618,7 +1613,7 @@ fn grateic_help_text(topic: HelpTopicChoice) -> &'static str {
             "Grateic Phone help: create a lobby with `/grate create`, then players use `/grate grateic join`, and the host uses `/grate grateic start`.\n\nUse the `topic` option on `/grate grateic help` for focused help: `commands`, `create settings`, `modes`, `game flow examples`, or `canvas size rule`.\n\nDefault behavior: `/grate create` requires a mode, preset, and background. `custom_background` is only needed for `custom hex`. `require_canvas_size` defaults to enabled, so drawing uploads must match the selected canvas size unless the host turns it off."
         }
         HelpTopicChoice::Commands => {
-            "Grateic Phone commands:\n`/grate create`: create a Grateic Phone lobby. Choose `mode`, `preset`, and `background`.\n`/grate grateic join`: join the active lobby in this server.\n`/grate grateic ready`: retry the DM check if the bot could not DM you.\n`/grate grateic start`: host-only; starts the active lobby after at least 2 players join.\n`/grate grateic status`: refresh lobby status before start, or privately show in-progress round status.\n`/grate grateic cancel`: host-only; cancel the active lobby before it starts.\n`/grate grateic force_cancel`: host-only; force-cancel a stuck active game.\n`/grate grateic set channel`: set the only channel where Grateic commands work.\n`/grate grateic help`: explain commands, settings, modes, and rules."
+            "Grateic Phone commands:\n`/grate create`: create a Grateic Phone lobby. Choose `mode`, `preset`, and `background`.\n`/grate grateic join`: join the active lobby in this server.\n`/grate grateic ready`: retry the DM check if the bot could not DM you.\n`/grate grateic start`: host-only; starts the active lobby after at least 2 players join.\n`/grate grateic status`: refresh lobby status before start, or privately show in-progress round status.\n`/grate grateic cancel`: host-only; cancel the active lobby before it starts.\n`/grate grateic force_cancel`: host-only; force-cancel a stuck active game.\n`/grate grateic set-channel`: set the only channel where Grateic commands work.\n`/grate grateic help`: explain commands, settings, modes, and rules."
         }
         HelpTopicChoice::CreateSettings => {
             "`/grate create` settings:\n`mode`: `short` is one prompt plus one drawing. `full` is the full telephone-style chain game.\n`preset`: canvas size. `square` is 1024x1024, `portrait` is 1080x1920, `landscape` is 1920x1080.\n`background`: canvas background color preset. Choose `custom hex` only when you want your own color.\n`custom_background`: required only when `background` is `custom hex`; use `#RRGGBB`, like `#ff00aa`.\n`require_canvas_size`: optional. Defaults to `true`. When `false`, drawing uploads can use any image size."

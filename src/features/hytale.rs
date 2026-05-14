@@ -152,8 +152,9 @@ fn default_hytale_dir() -> PathBuf {
         "restart",
         "check_update",
         "update",
-        "set",
-        "toggle"
+        "set_channel",
+        "set_password",
+        "toggle_password"
     )
 )]
 pub async fn hytale(_ctx: Context<'_>) -> Result<(), Error> {
@@ -266,14 +267,9 @@ async fn update(ctx: Context<'_>) -> Result<(), Error> {
     run_hytale_command(ctx, HytaleScriptAction::Update).await
 }
 
-#[poise::command(slash_command, subcommands("set_channel", "set_password"))]
-async fn set(_ctx: Context<'_>) -> Result<(), Error> {
-    Ok(())
-}
-
 #[poise::command(
     slash_command,
-    rename = "channel",
+    rename = "set-channel",
     description_localized("en-US", "Set the only channel where Hytale commands work")
 )]
 async fn set_channel(
@@ -307,7 +303,7 @@ async fn set_channel(
 
 #[poise::command(
     slash_command,
-    rename = "password",
+    rename = "set-password",
     description_localized("en-US", "Set and enable the Hytale server password")
 )]
 async fn set_password(
@@ -354,14 +350,9 @@ async fn set_password(
     Ok(())
 }
 
-#[poise::command(slash_command, subcommands("toggle_password"))]
-async fn toggle(_ctx: Context<'_>) -> Result<(), Error> {
-    Ok(())
-}
-
 #[poise::command(
     slash_command,
-    rename = "password",
+    rename = "toggle-password",
     description_localized("en-US", "Toggle Hytale server password protection")
 )]
 async fn toggle_password(ctx: Context<'_>) -> Result<(), Error> {
@@ -380,7 +371,7 @@ async fn toggle_password(ctx: Context<'_>) -> Result<(), Error> {
     if enabled && current.last_password.as_deref().unwrap_or("").is_empty() {
         ctx.send(
             poise::CreateReply::default()
-                .content("No Hytale password is saved yet. Use `/grate hytale set password` first.")
+                .content("No Hytale password is saved yet. Use `/grate hytale set-password` first.")
                 .ephemeral(true),
         )
         .await?;
@@ -1050,13 +1041,13 @@ fn hytale_help_text(topic: HytaleHelpTopicChoice) -> &'static str {
             "Hytale help: these commands let trusted server helpers check, manage, and update the hosted Hytale server. Everyone can use `/grate hytale join` for public join info.\n\nUse the `topic` option on `/grate hytale help` for focused help: `commands`, `settings`, `permissions`, `operations flow`, or `troubleshooting`.\n\nDefault behavior: the bot calls `~/hytale/hytale-manage.sh`, manages `hytale-server.service`, waits up to 15 seconds for regular commands, and waits up to 1800 seconds for update checks and updates unless the bot owner configured different environment variables. Management commands require the Hytale manager role."
         }
         HytaleHelpTopicChoice::Commands => {
-            "Hytale commands:\n`/grate hytale help`: explain commands, settings, permissions, and troubleshooting.\n`/grate hytale join`: print public server address and password when enabled.\n`/grate hytale status`: checks the service status using the management script.\n`/grate hytale logs`: shows recent service logs using the management script.\n`/grate hytale start`: starts the server.\n`/grate hytale stop`: stops the server.\n`/grate hytale restart`: restarts the server.\n`/grate hytale check-update`: checks whether a server update is available without applying it.\n`/grate hytale update`: stops the server if needed, updates it, and starts it again.\n`/grate hytale set channel`: set the only channel where Hytale commands work.\n`/grate hytale set password`: set and enable the server password.\n`/grate hytale toggle password`: turn password protection on or off.\n\nManager commands are ephemeral and require the configured manager role."
+            "Hytale commands:\n`/grate hytale help`: explain commands, settings, permissions, and troubleshooting.\n`/grate hytale join`: print public server address and password when enabled.\n`/grate hytale status`: checks the service status using the management script.\n`/grate hytale logs`: shows recent service logs using the management script.\n`/grate hytale start`: starts the server.\n`/grate hytale stop`: stops the server.\n`/grate hytale restart`: restarts the server.\n`/grate hytale check-update`: checks whether a server update is available without applying it.\n`/grate hytale update`: stops the server if needed, updates it, and starts it again.\n`/grate hytale set-channel`: set the only channel where Hytale commands work.\n`/grate hytale set-password`: set and enable the server password.\n`/grate hytale toggle-password`: turn password protection on or off.\n\nManager commands are ephemeral and require the configured manager role."
         }
         HytaleHelpTopicChoice::Settings => {
             "Hytale settings for the bot owner:\n`HYTALE_MANAGER_ROLE_ID`: required Discord role ID allowed to use Hytale controls.\n`HYTALE_MANAGE_SCRIPT`: optional path to `hytale-manage.sh`. Defaults to `~/hytale/hytale-manage.sh`.\n`HYTALE_DIR`: optional Hytale install directory containing `Server/config.json`. Defaults to `~/hytale`.\n`HYTALE_SERVICE_NAME`: optional systemd service name passed to the script as `SERVICE_NAME`. Defaults to `hytale-server.service`.\n`HYTALE_COMMAND_TIMEOUT_SECONDS`: optional timeout for status, logs, start, stop, and restart. Defaults to 15 seconds, with a minimum of 1 second.\n`HYTALE_DOWNLOAD_TIMEOUT_SECONDS`: optional timeout for `/grate hytale check-update` and `/grate hytale update`, also passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`. Defaults to 1800 seconds, with a minimum of 1 second.\n\nIf the required role ID is missing or invalid, management commands explain the setup problem instead of running."
         }
         HytaleHelpTopicChoice::Permissions => {
-            "Hytale permissions:\nOnly members with the configured Hytale manager role can run `status`, `logs`, `start`, `stop`, `restart`, `check-update`, `update`, `set channel`, `set password`, or `toggle password`.\n\nThe bot only calls the configured `hytale-manage.sh` script with one of those fixed service actions. The script handles systemd, logs, sudo, and update work on the host.\n\nThe help and join commands are available without the manager role so people can discover how the controls work and connect to the server."
+            "Hytale permissions:\nOnly members with the configured Hytale manager role can run `status`, `logs`, `start`, `stop`, `restart`, `check-update`, `update`, `set-channel`, `set-password`, or `toggle-password`.\n\nThe bot only calls the configured `hytale-manage.sh` script with one of those fixed service actions. The script handles systemd, logs, sudo, and update work on the host.\n\nThe help and join commands are available without the manager role so people can discover how the controls work and connect to the server."
         }
         HytaleHelpTopicChoice::OperationsFlow => {
             "Typical Hytale operations flow:\n1. Run `/grate hytale status` to see whether the service is active or failed.\n2. If players report issues, run `/grate hytale logs` and scan recent output.\n3. Use `/grate hytale start` only when the server is stopped.\n4. Use `/grate hytale restart` when the server is wedged and logs/status suggest a restart is appropriate.\n5. Use `/grate hytale stop` when intentionally taking the server offline.\n6. Use `/grate hytale check-update` to see whether a new server build is available.\n7. Use `/grate hytale update` when applying a new server build.\n8. Re-check `/grate hytale status` after start, stop, restart, or update."

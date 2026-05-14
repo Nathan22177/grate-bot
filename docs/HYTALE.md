@@ -15,11 +15,11 @@ Hytale management lets trusted Discord helpers check, manage, and update a co-ho
 | `/grate hytale restart` | Restart the Hytale service. |
 | `/grate hytale check-update` | Check whether a Hytale server update is available without applying it. |
 | `/grate hytale update` | Update the Hytale server and restart it. |
-| `/grate hytale set channel` | Set the only channel where Hytale commands work. Manager role only. |
-| `/grate hytale set password` | Set and enable the Hytale server password. Manager role only. |
-| `/grate hytale toggle password` | Turn Hytale password protection on or off. Manager role only. |
+| `/grate hytale set-channel` | Set the only channel where Hytale commands work. Manager role only. |
+| `/grate hytale set-password` | Set and enable the Hytale server password. Manager role only. |
+| `/grate hytale toggle-password` | Turn Hytale password protection on or off. Manager role only. |
 
-Operational Hytale command responses are ephemeral and require the configured Hytale manager role. `/grate hytale help` and `/grate hytale join` are available without that role so people can discover setup and join information. If `/grate hytale set channel` has been used, all Hytale commands only work in that configured channel. If the configured channel is deleted, the bot clears the setting on the next Hytale command and allows Hytale commands everywhere until a new channel is set.
+Operational Hytale command responses are ephemeral and require the configured Hytale manager role. `/grate hytale help` and `/grate hytale join` are available without that role so people can discover setup and join information. If `/grate hytale set-channel` has been used, all Hytale commands only work in that configured channel. If the configured channel is deleted, the bot clears the setting on the next Hytale command and allows Hytale commands everywhere until a new channel is set.
 
 ## Script Contract
 

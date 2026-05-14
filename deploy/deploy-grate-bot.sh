@@ -25,6 +25,7 @@ SKIP_BUILD="${SKIP_BUILD:-0}"
 SKIP_SERVICE_FILE="${SKIP_SERVICE_FILE:-0}"
 SKIP_HYTALE_SCRIPT_CONFIG="${SKIP_HYTALE_SCRIPT_CONFIG:-0}"
 SKIP_HYTALE_SUDOERS="${SKIP_HYTALE_SUDOERS:-0}"
+HEALTHCHECK_SECONDS="${HEALTHCHECK_SECONDS:-10}"
 
 log() {
   printf '[deploy-grate-bot] %s\n' "$*"
@@ -291,6 +292,7 @@ Environment overrides:
   SKIP_SERVICE_FILE=1          do not install or enable the systemd service file
   SKIP_HYTALE_SCRIPT_CONFIG=1  do not update HYTALE_MANAGE_SCRIPT in ENV_FILE
   SKIP_HYTALE_SUDOERS=1        do not install Hytale sudoers rules
+  HEALTHCHECK_SECONDS          seconds to wait for startup health logs, default: 10
 
 Examples:
   deploy/deploy-grate-bot.sh
@@ -562,13 +564,39 @@ sudo install -o "$BOT_USER" -g "$BOT_GROUP" -m 0755 \
 
 
 log "Starting $SERVICE_NAME"
+service_start_epoch="$(date +%s)"
 sudo systemctl start "$SERVICE_NAME"
-sleep 3
-if ! sudo systemctl is-active --quiet "$SERVICE_NAME"; then
-  log "$SERVICE_NAME did not stay active after start"
+startup_logs=""
+startup_ok=0
+for (( waited = 0; waited < HEALTHCHECK_SECONDS; waited++ )); do
+  sleep 1
+  startup_logs="$(sudo journalctl -u "$SERVICE_NAME" --since "@$service_start_epoch" --no-pager || true)"
+
+  if ! sudo systemctl is-active --quiet "$SERVICE_NAME"; then
+    log "$SERVICE_NAME did not stay active after start"
+    sudo systemctl status "$SERVICE_NAME" --no-pager || true
+    sudo journalctl -u "$SERVICE_NAME" -n 80 --no-pager || true
+    fail "$SERVICE_NAME failed after start"
+  fi
+
+  if grep -Eq 'Error in user data setup|Invalid Form Body|error while loading shared libraries|thread .* panicked|panicked at' <<<"$startup_logs"; then
+    log "$SERVICE_NAME logged a startup error"
+    sudo systemctl status "$SERVICE_NAME" --no-pager || true
+    sudo journalctl -u "$SERVICE_NAME" --since "@$service_start_epoch" --no-pager || true
+    fail "$SERVICE_NAME failed startup health check"
+  fi
+
+  if grep -Fq ' is online' <<<"$startup_logs"; then
+    startup_ok=1
+    break
+  fi
+done
+
+if [[ "$startup_ok" != "1" ]]; then
+  log "$SERVICE_NAME did not log successful startup within ${HEALTHCHECK_SECONDS}s"
   sudo systemctl status "$SERVICE_NAME" --no-pager || true
-  sudo journalctl -u "$SERVICE_NAME" -n 80 --no-pager || true
-  fail "$SERVICE_NAME failed after start"
+  sudo journalctl -u "$SERVICE_NAME" --since "@$service_start_epoch" --no-pager || true
+  fail "$SERVICE_NAME failed startup health check"
 fi
 
 log "Service status"
