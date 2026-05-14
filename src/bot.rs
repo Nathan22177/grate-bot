@@ -1,7 +1,10 @@
-use crate::features::grateic::{self as grateic_feature, create, grateic};
+use crate::{
+    features::grateic::{self as grateic_feature, create, grateic},
+    settings::{ChannelFamily, SettingsStore},
+};
 use anyhow::Context as AnyhowContext;
 use poise::serenity_prelude as serenity;
-use serenity::{FullEvent, GatewayIntents};
+use serenity::{ChannelId, FullEvent, GatewayIntents, GuildId};
 use sha2::{Digest, Sha256};
 use std::{fmt::Write as _, path::Path};
 
@@ -13,6 +16,7 @@ pub(crate) type Context<'a> = poise::Context<'a, Data, Error>;
 #[derive(Debug, Clone, Default)]
 pub struct Data {
     pub(crate) grateic: grateic_feature::State,
+    pub(crate) settings: SettingsStore,
 }
 
 pub async fn run() -> anyhow::Result<()> {
@@ -47,9 +51,14 @@ pub async fn run() -> anyhow::Result<()> {
         .setup(|ctx, ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+
+                let data = Data {
+                    grateic: grateic_feature::State::default(),
+                    settings: SettingsStore::load_from_env().await?,
+                };
                 println!("{} is online", ready.user.name);
 
-                Ok(Data::default())
+                Ok(data)
             })
         })
         .build();
@@ -145,6 +154,116 @@ fn sha256_file(path: &Path) -> anyhow::Result<String> {
     Ok(hex)
 }
 
+pub(crate) async fn ensure_command_channel(
+    ctx: Context<'_>,
+    family: ChannelFamily,
+) -> Result<bool, Error> {
+    let Some(guild_id) = ctx.guild_id() else {
+        return Ok(true);
+    };
+    let Some(configured_channel_id) = ctx.data().settings.channel(guild_id.get(), family).await
+    else {
+        return Ok(true);
+    };
+
+    let current_channel_id = ctx.channel_id().get();
+    if current_channel_id == configured_channel_id {
+        return Ok(true);
+    }
+
+    let lookup = channel_lookup_for_gate(ctx, guild_id, configured_channel_id).await;
+    match channel_gate_action(configured_channel_id, current_channel_id, lookup) {
+        ChannelGateAction::ClearAndAllow => {
+            ctx.data()
+                .settings
+                .clear_channel(guild_id.get(), family)
+                .await?;
+            ctx.send(
+                poise::CreateReply::default()
+                    .content(format!(
+                        "The configured {} channel no longer exists, so I cleared that setting. {} commands are allowed everywhere until someone sets a new channel.",
+                        family.label(),
+                        family.label()
+                    ))
+                    .ephemeral(true),
+            )
+            .await?;
+            Ok(true)
+        }
+        ChannelGateAction::Block => {
+            ctx.send(
+                poise::CreateReply::default()
+                    .content(format!(
+                        "{} commands only work in <#{}>.",
+                        family.label(),
+                        configured_channel_id
+                    ))
+                    .ephemeral(true),
+            )
+            .await?;
+            Ok(false)
+        }
+        ChannelGateAction::Allow => Ok(true),
+    }
+}
+
+fn channel_gate_action(
+    configured_channel_id: u64,
+    current_channel_id: u64,
+    lookup: ChannelLookup,
+) -> ChannelGateAction {
+    if current_channel_id == configured_channel_id {
+        return ChannelGateAction::Allow;
+    }
+
+    match lookup {
+        ChannelLookup::Missing => ChannelGateAction::ClearAndAllow,
+        ChannelLookup::ExistsInGuild | ChannelLookup::AmbiguousFailure => ChannelGateAction::Block,
+    }
+}
+
+async fn channel_lookup_for_gate(
+    ctx: Context<'_>,
+    guild_id: GuildId,
+    channel_id: u64,
+) -> ChannelLookup {
+    match ctx
+        .serenity_context()
+        .http
+        .get_channel(ChannelId::new(channel_id))
+        .await
+    {
+        Ok(serenity::Channel::Guild(channel)) if channel.guild_id == guild_id => {
+            ChannelLookup::ExistsInGuild
+        }
+        Ok(_) => ChannelLookup::Missing,
+        Err(error) if is_unknown_channel_error(&error) => ChannelLookup::Missing,
+        Err(_) => ChannelLookup::AmbiguousFailure,
+    }
+}
+
+fn is_unknown_channel_error(error: &serenity::Error) -> bool {
+    matches!(
+        error,
+        serenity::Error::Http(serenity::http::HttpError::UnsuccessfulRequest(response))
+            if response.status_code.as_u16() == 404 && response.error.code == 10003
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChannelLookup {
+    ExistsInGuild,
+    Missing,
+    AmbiguousFailure,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChannelGateAction {
+    Allow,
+    Block,
+    ClearAndAllow,
+}
+
 fn help_message() -> String {
     "Grate Boss help\n\
 \n\
@@ -156,7 +275,7 @@ Useful commands:\n\
 	- `/grate create` starts a Grateic Phone lobby with mode, canvas size, background, and canvas-size-rule options.\n\
 	- `/grate grateic help`, `/grate grateic join`, `/grate grateic ready`, `/grate grateic start`, `/grate grateic status`, `/grate grateic cancel`, and `/grate grateic force_cancel` explain or manage a Grateic Phone game.\n\
 - `/grate verify` reports what build is currently running.\n\
-- `/grate hytale help`, `/grate hytale status`, `/grate hytale logs`, `/grate hytale start`, `/grate hytale stop`, `/grate hytale restart`, `/grate hytale check-update`, and `/grate hytale update` manage the Hytale server for members with the configured manager role.\n\
+- `/grate hytale help`, `/grate hytale join`, `/grate hytale status`, `/grate hytale logs`, `/grate hytale start`, `/grate hytale stop`, `/grate hytale restart`, `/grate hytale check-update`, `/grate hytale update`, and Hytale settings commands manage or share the Hytale server.\n\
 \n\
 Notes: Grateic Phone game state is kept in memory, so active games reset if I restart."
         .to_owned()
@@ -173,9 +292,36 @@ mod tests {
         assert!(message.contains("Grateic Phone"));
         assert!(message.contains("Build verification"));
         assert!(message.contains("/grate verify"));
-
         assert!(message.contains("/grate hytale status"));
         assert!(message.contains("/grate hytale check-update"));
         assert!(message.contains("/grate hytale update"));
+    }
+
+    #[test]
+    fn channel_gate_allows_matching_channel() {
+        assert_eq!(
+            channel_gate_action(10, 10, ChannelLookup::AmbiguousFailure),
+            ChannelGateAction::Allow
+        );
+    }
+
+    #[test]
+    fn channel_gate_blocks_wrong_channel_when_configured_channel_exists() {
+        assert_eq!(
+            channel_gate_action(10, 11, ChannelLookup::ExistsInGuild),
+            ChannelGateAction::Block
+        );
+    }
+
+    #[test]
+    fn channel_gate_clears_only_definitive_missing_channel() {
+        assert_eq!(
+            channel_gate_action(10, 11, ChannelLookup::Missing),
+            ChannelGateAction::ClearAndAllow
+        );
+        assert_eq!(
+            channel_gate_action(10, 11, ChannelLookup::AmbiguousFailure),
+            ChannelGateAction::Block
+        );
     }
 }

@@ -1,10 +1,15 @@
-use crate::bot::Context;
+use crate::{
+    bot::{Context, ensure_command_channel},
+    settings::{ChannelFamily, HytalePasswordSettings},
+};
 use anyhow::Context as AnyhowContext;
 use poise::serenity_prelude as serenity;
 use serde::Deserialize;
+use serde_json::{Map, Value};
 use serenity::RoleId;
 use std::{
-    path::PathBuf,
+    net::IpAddr,
+    path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
     time::Duration,
 };
@@ -42,6 +47,7 @@ struct HytaleConfig {
     manager_role_id: RoleId,
     service_name: String,
     manage_script: PathBuf,
+    hytale_dir: PathBuf,
     command_timeout: Duration,
     download_timeout: Duration,
 }
@@ -53,6 +59,7 @@ impl HytaleConfig {
             .unwrap_or_else(|| DEFAULT_SERVICE_NAME.to_owned());
         let manage_script =
             read_env_path("HYTALE_MANAGE_SCRIPT").unwrap_or_else(default_manage_script);
+        let hytale_dir = read_env_path("HYTALE_DIR").unwrap_or_else(default_hytale_dir);
         let command_timeout_seconds = read_u64(
             "HYTALE_COMMAND_TIMEOUT_SECONDS",
             DEFAULT_COMMAND_TIMEOUT_SECONDS,
@@ -66,6 +73,7 @@ impl HytaleConfig {
             manager_role_id,
             service_name,
             manage_script,
+            hytale_dir,
             command_timeout: Duration::from_secs(command_timeout_seconds.max(1)),
             download_timeout: Duration::from_secs(download_timeout_seconds.max(1)),
         })
@@ -125,17 +133,27 @@ fn default_manage_script() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("hytale-manage.sh"))
 }
 
+fn default_hytale_dir() -> PathBuf {
+    std::env::var("HOME")
+        .map(|home| PathBuf::from(home).join("hytale"))
+        .unwrap_or_else(|_| PathBuf::from("hytale"))
+}
+
 #[poise::command(
     slash_command,
     subcommands(
         "help",
+        "join",
         "status",
         "logs",
         "start",
         "stop",
         "restart",
         "check_update",
-        "update"
+        "update",
+        "set_channel",
+        "set_password",
+        "toggle_password"
     )
 )]
 pub async fn hytale(_ctx: Context<'_>) -> Result<(), Error> {
@@ -147,11 +165,43 @@ async fn help(
     ctx: Context<'_>,
     #[description = "What to explain; defaults to overview"] topic: Option<HytaleHelpTopicChoice>,
 ) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Hytale).await? {
+        return Ok(());
+    }
+
     ctx.say(hytale_help_text(
         topic.unwrap_or(HytaleHelpTopicChoice::Overview),
     ))
     .await?;
 
+    Ok(())
+}
+
+#[poise::command(
+    slash_command,
+    description_localized("en-US", "Show the public Hytale server address and password")
+)]
+async fn join(ctx: Context<'_>) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Hytale).await? {
+        return Ok(());
+    }
+
+    let Some(guild_id) = ctx.guild_id() else {
+        ctx.send(
+            poise::CreateReply::default()
+                .content("Hytale join info only works inside the Discord server.")
+                .ephemeral(true),
+        )
+        .await?;
+        return Ok(());
+    };
+
+    ctx.defer().await?;
+    let public_ip = public_ip_for_join(ctx, guild_id.get()).await?;
+    let password = ctx.data().settings.hytale_password(guild_id.get()).await;
+
+    ctx.say(format_hytale_join_message(&public_ip, &password))
+        .await?;
     Ok(())
 }
 
@@ -212,7 +262,160 @@ async fn update(ctx: Context<'_>) -> Result<(), Error> {
     run_hytale_command(ctx, HytaleScriptAction::Update).await
 }
 
+#[poise::command(
+    slash_command,
+    rename = "set-channel",
+    description_localized("en-US", "Set the only channel where Hytale commands work")
+)]
+async fn set_channel(
+    ctx: Context<'_>,
+    #[description = "Channel where Hytale commands should work"] channel: serenity::GuildChannel,
+) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Hytale).await? {
+        return Ok(());
+    }
+    let Some(_config) = hytale_config_for(ctx).await? else {
+        return Ok(());
+    };
+    let Some(guild_id) = ctx.guild_id() else {
+        return Ok(());
+    };
+    ctx.data()
+        .settings
+        .set_channel(guild_id.get(), ChannelFamily::Hytale, channel.id.get())
+        .await?;
+    ctx.send(
+        poise::CreateReply::default()
+            .content(format!(
+                "Hytale commands now only work in <#{}>.",
+                channel.id.get()
+            ))
+            .ephemeral(true),
+    )
+    .await?;
+    Ok(())
+}
+
+#[poise::command(
+    slash_command,
+    rename = "set-password",
+    description_localized("en-US", "Set and enable the Hytale server password")
+)]
+async fn set_password(
+    ctx: Context<'_>,
+    #[description = "New Hytale server password"] password: String,
+) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Hytale).await? {
+        return Ok(());
+    }
+    let Some(config) = hytale_config_for(ctx).await? else {
+        return Ok(());
+    };
+    let Some(guild_id) = ctx.guild_id() else {
+        return Ok(());
+    };
+    let password = password.trim().to_owned();
+    if password.is_empty() {
+        ctx.send(
+            poise::CreateReply::default()
+                .content("Password cannot be empty.")
+                .ephemeral(true),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    ctx.defer_ephemeral().await?;
+    let password_settings = HytalePasswordSettings {
+        password_enabled: true,
+        last_password: Some(password.clone()),
+    };
+    write_hytale_password_config(&config.hytale_dir, &password_settings).await?;
+    ctx.data()
+        .settings
+        .set_hytale_password(guild_id.get(), password, true)
+        .await?;
+    verify_hytale_password_settings_persisted(ctx, guild_id.get(), &password_settings).await?;
+    send_ephemeral(
+        ctx,
+        "Hytale password updated and enabled. Restarting the server...",
+    )
+    .await?;
+    restart_after_password_change(ctx, &config).await?;
+    Ok(())
+}
+
+#[poise::command(
+    slash_command,
+    rename = "toggle-password",
+    description_localized("en-US", "Toggle Hytale server password protection")
+)]
+async fn toggle_password(ctx: Context<'_>) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Hytale).await? {
+        return Ok(());
+    }
+    let Some(config) = hytale_config_for(ctx).await? else {
+        return Ok(());
+    };
+    let Some(guild_id) = ctx.guild_id() else {
+        return Ok(());
+    };
+
+    let current = ctx.data().settings.hytale_password(guild_id.get()).await;
+    let enabled = !current.password_enabled;
+    if enabled && current.last_password.as_deref().unwrap_or("").is_empty() {
+        ctx.send(
+            poise::CreateReply::default()
+                .content("No Hytale password is saved yet. Use `/grate hytale set-password` first.")
+                .ephemeral(true),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    ctx.defer_ephemeral().await?;
+    let password_settings = HytalePasswordSettings {
+        password_enabled: enabled,
+        last_password: current.last_password.clone(),
+    };
+    write_hytale_password_config(&config.hytale_dir, &password_settings).await?;
+    ctx.data()
+        .settings
+        .set_hytale_password_enabled(guild_id.get(), enabled)
+        .await?;
+    verify_hytale_password_settings_persisted(ctx, guild_id.get(), &password_settings).await?;
+    let state = if enabled { "enabled" } else { "disabled" };
+    send_ephemeral(
+        ctx,
+        format!("Hytale password protection {state}. Restarting the server..."),
+    )
+    .await?;
+    restart_after_password_change(ctx, &config).await?;
+    Ok(())
+}
+
+async fn verify_hytale_password_settings_persisted(
+    ctx: Context<'_>,
+    guild_id: u64,
+    expected: &HytalePasswordSettings,
+) -> Result<(), Error> {
+    let reloaded = crate::settings::SettingsStore::load(ctx.data().settings.path().to_path_buf())
+        .await
+        .context("could not reload bot settings after saving Hytale password state")?;
+    let actual = reloaded.hytale_password(guild_id).await;
+    if &actual != expected {
+        anyhow::bail!(
+            "saved Hytale password state did not match after reloading bot settings; server restart skipped"
+        );
+    }
+    Ok(())
+}
+
 async fn run_hytale_command(ctx: Context<'_>, action: HytaleScriptAction) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Hytale).await? {
+        return Ok(());
+    }
+
     let Some(config) = hytale_config_for(ctx).await? else {
         return Ok(());
     };
@@ -237,6 +440,29 @@ async fn run_hytale_command(ctx: Context<'_>, action: HytaleScriptAction) -> Res
     };
     send_ephemeral(ctx, final_response(action, &output)).await?;
 
+    Ok(())
+}
+
+async fn restart_after_password_change(
+    ctx: Context<'_>,
+    config: &HytaleConfig,
+) -> Result<(), Error> {
+    let output = match run_script_with_progress(ctx, config, HytaleScriptAction::Restart).await {
+        Ok(output) => output,
+        Err(error) => {
+            send_ephemeral(
+                ctx,
+                format!(
+                    "Hytale restart failed after password change: {}",
+                    truncate_inline(&format!("{error:#}"), MAX_RESPONSE_CHARS)
+                ),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    send_ephemeral(ctx, final_response(HytaleScriptAction::Restart, &output)).await?;
     Ok(())
 }
 
@@ -639,6 +865,133 @@ fn final_output_response(action: HytaleScriptAction, output: &ScriptOutput) -> S
     )
 }
 
+async fn public_ip_for_join(ctx: Context<'_>, guild_id: u64) -> Result<String, Error> {
+    let cached_ip = ctx.data().settings.hytale_cached_public_ip(guild_id).await;
+    match fetch_public_ip().await {
+        Ok(public_ip) => {
+            ctx.data()
+                .settings
+                .set_hytale_cached_public_ip(guild_id, public_ip.clone())
+                .await?;
+            Ok(public_ip)
+        }
+        Err(error) => cached_ip.ok_or(error),
+    }
+}
+
+async fn fetch_public_ip() -> Result<String, Error> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .context("could not build public IP lookup client")?;
+    let ip_text = client
+        .get("https://api.getpublicip.com/ip")
+        .send()
+        .await
+        .context("could not look up the public Hytale server IP")?
+        .error_for_status()
+        .context("public Hytale server IP lookup failed")?
+        .text()
+        .await
+        .context("could not read public Hytale server IP response")?;
+    extract_public_ip(&ip_text)
+}
+
+fn extract_public_ip(response: &str) -> Result<String, Error> {
+    response
+        .split(|character: char| !(character.is_ascii_hexdigit() || matches!(character, '.' | ':')))
+        .find_map(|candidate| {
+            candidate
+                .parse::<IpAddr>()
+                .ok()
+                .map(|_| candidate.to_owned())
+        })
+        .with_context(|| {
+            format!(
+                "public IP lookup response did not contain an IP address: {}",
+                truncate_inline(response.trim(), 200)
+            )
+        })
+}
+
+fn format_hytale_join_message(public_ip: &str, password: &HytalePasswordSettings) -> String {
+    let mut message = format!("Address:\n{}", code_block(public_ip));
+    if password.password_enabled
+        && let Some(password) = password
+            .last_password
+            .as_deref()
+            .filter(|password| !password.is_empty())
+    {
+        message.push_str(&format!("\nPassword:\n{}", code_block(password)));
+    }
+    message
+}
+
+async fn read_hytale_server_config(hytale_dir: &Path) -> Result<Value, Error> {
+    let path = hytale_config_path(hytale_dir);
+    match tokio::fs::read_to_string(&path).await {
+        Ok(contents) => serde_json::from_str(&contents)
+            .with_context(|| format!("could not parse {}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Object(Map::new())),
+        Err(error) => Err(error).with_context(|| format!("could not read {}", path.display())),
+    }
+}
+
+async fn write_hytale_password_config(
+    hytale_dir: &Path,
+    password: &HytalePasswordSettings,
+) -> Result<(), Error> {
+    let mut config = read_hytale_server_config(hytale_dir).await?;
+    let object = ensure_json_object(&mut config);
+    object.insert(
+        "Password".to_owned(),
+        Value::String(
+            password
+                .password_enabled
+                .then(|| password.last_password.clone())
+                .flatten()
+                .unwrap_or_default(),
+        ),
+    );
+    object.insert(
+        "GrateBot".to_owned(),
+        serde_json::json!({
+            "password_enabled": password.password_enabled,
+            "password": password.last_password.clone(),
+        }),
+    );
+
+    let path = hytale_config_path(hytale_dir);
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("could not create {}", parent.display()))?;
+    }
+
+    let contents = serde_json::to_vec_pretty(&config)?;
+    let temp_path = path.with_file_name("config.json.tmp");
+    tokio::fs::write(&temp_path, contents)
+        .await
+        .with_context(|| format!("could not write {}", temp_path.display()))?;
+    tokio::fs::rename(&temp_path, &path)
+        .await
+        .with_context(|| format!("could not replace {}", path.display()))?;
+    Ok(())
+}
+
+fn ensure_json_object(value: &mut Value) -> &mut Map<String, Value> {
+    if !value.is_object() {
+        *value = Value::Object(Map::new());
+    }
+    value
+        .as_object_mut()
+        .expect("value was just made an object")
+}
+
+fn hytale_config_path(hytale_dir: &Path) -> PathBuf {
+    hytale_dir.join("Server/config.json")
+}
+
 fn failure_hint(output: &str) -> Option<&'static str> {
     let normalized = output.to_ascii_lowercase();
     if normalized.contains("sudo: a password is required")
@@ -700,16 +1053,16 @@ fn truncate_inline(value: &str, max_chars: usize) -> String {
 fn hytale_help_text(topic: HytaleHelpTopicChoice) -> &'static str {
     match topic {
         HytaleHelpTopicChoice::Overview => {
-            "Hytale help: these commands let trusted server helpers check, manage, and update the hosted Hytale server.\n\nUse the `topic` option on `/grate hytale help` for focused help: `commands`, `settings`, `permissions`, `operations flow`, or `troubleshooting`.\n\nDefault behavior: the bot calls `~/hytale/hytale-manage.sh`, manages `hytale-server.service`, waits up to 15 seconds for regular commands, and waits up to 1800 seconds for update checks and updates unless the bot owner configured different environment variables. All management commands require the Hytale manager role."
+            "Hytale help: these commands let trusted server helpers check, manage, and update the hosted Hytale server. Everyone can use `/grate hytale join` for public join info.\n\nUse the `topic` option on `/grate hytale help` for focused help: `commands`, `settings`, `permissions`, `operations flow`, or `troubleshooting`.\n\nDefault behavior: the bot calls `~/hytale/hytale-manage.sh`, manages `hytale-server.service`, waits up to 15 seconds for regular commands, and waits up to 1800 seconds for update checks and updates unless the bot owner configured different environment variables. Management commands require the Hytale manager role."
         }
         HytaleHelpTopicChoice::Commands => {
-            "Hytale commands:\n`/grate hytale help`: explain commands, settings, permissions, and troubleshooting.\n`/grate hytale status`: checks the service status using the management script.\n`/grate hytale logs`: shows recent service logs using the management script.\n`/grate hytale start`: starts the server.\n`/grate hytale stop`: stops the server.\n`/grate hytale restart`: restarts the server.\n`/grate hytale check-update`: checks whether a server update is available without applying it.\n`/grate hytale update`: stops the server if needed, updates it, and starts it again.\n\nAll operational commands are ephemeral and require the configured manager role."
+            "Hytale commands:\n`/grate hytale help`: explain commands, settings, permissions, and troubleshooting.\n`/grate hytale join`: print public server address and password when enabled.\n`/grate hytale status`: checks the service status using the management script.\n`/grate hytale logs`: shows recent service logs using the management script.\n`/grate hytale start`: starts the server.\n`/grate hytale stop`: stops the server.\n`/grate hytale restart`: restarts the server.\n`/grate hytale check-update`: checks whether a server update is available without applying it.\n`/grate hytale update`: stops the server if needed, updates it, and starts it again.\n`/grate hytale set-channel`: set the only channel where Hytale commands work.\n`/grate hytale set-password`: set and enable the server password.\n`/grate hytale toggle-password`: turn password protection on or off.\n\nManager commands are ephemeral and require the configured manager role."
         }
         HytaleHelpTopicChoice::Settings => {
-            "Hytale settings for the bot owner:\n`HYTALE_MANAGER_ROLE_ID`: required Discord role ID allowed to use Hytale controls.\n`HYTALE_MANAGE_SCRIPT`: optional path to `hytale-manage.sh`. Defaults to `~/hytale/hytale-manage.sh`.\n`HYTALE_SERVICE_NAME`: optional systemd service name passed to the script as `SERVICE_NAME`. Defaults to `hytale-server.service`.\n`HYTALE_COMMAND_TIMEOUT_SECONDS`: optional timeout for status, logs, start, stop, and restart. Defaults to 15 seconds, with a minimum of 1 second.\n`HYTALE_DOWNLOAD_TIMEOUT_SECONDS`: optional timeout for `/grate hytale check-update` and `/grate hytale update`, also passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`. Defaults to 1800 seconds, with a minimum of 1 second.\n\nIf the required role ID is missing or invalid, management commands explain the setup problem instead of running."
+            "Hytale settings for the bot owner:\n`HYTALE_MANAGER_ROLE_ID`: required Discord role ID allowed to use Hytale controls.\n`HYTALE_MANAGE_SCRIPT`: optional path to `hytale-manage.sh`. Defaults to `~/hytale/hytale-manage.sh`.\n`HYTALE_DIR`: optional Hytale install directory containing `Server/config.json`. Defaults to `~/hytale`.\n`HYTALE_SERVICE_NAME`: optional systemd service name passed to the script as `SERVICE_NAME`. Defaults to `hytale-server.service`.\n`HYTALE_COMMAND_TIMEOUT_SECONDS`: optional timeout for status, logs, start, stop, and restart. Defaults to 15 seconds, with a minimum of 1 second.\n`HYTALE_DOWNLOAD_TIMEOUT_SECONDS`: optional timeout for `/grate hytale check-update` and `/grate hytale update`, also passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`. Defaults to 1800 seconds, with a minimum of 1 second.\n\nIf the required role ID is missing or invalid, management commands explain the setup problem instead of running."
         }
         HytaleHelpTopicChoice::Permissions => {
-            "Hytale permissions:\nOnly members with the configured Hytale manager role can run `status`, `logs`, `start`, `stop`, `restart`, `check-update`, or `update`.\n\nThe bot only calls the configured `hytale-manage.sh` script with one of those fixed actions. The script handles systemd, logs, sudo, and update work on the host.\n\nThe help command is available without the manager role so people can discover how the controls work."
+            "Hytale permissions:\nOnly members with the configured Hytale manager role can run `status`, `logs`, `start`, `stop`, `restart`, `check-update`, `update`, `set-channel`, `set-password`, or `toggle-password`.\n\nThe bot only calls the configured `hytale-manage.sh` script with one of those fixed service actions. The script handles systemd, logs, sudo, and update work on the host.\n\nThe help and join commands are available without the manager role so people can discover how the controls work and connect to the server."
         }
         HytaleHelpTopicChoice::OperationsFlow => {
             "Typical Hytale operations flow:\n1. Run `/grate hytale status` to see whether the service is active or failed.\n2. If players report issues, run `/grate hytale logs` and scan recent output.\n3. Use `/grate hytale start` only when the server is stopped.\n4. Use `/grate hytale restart` when the server is wedged and logs/status suggest a restart is appropriate.\n5. Use `/grate hytale stop` when intentionally taking the server offline.\n6. Use `/grate hytale check-update` to see whether a new server build is available.\n7. Use `/grate hytale update` when applying a new server build.\n8. Re-check `/grate hytale status` after start, stop, restart, or update."
@@ -758,6 +1111,7 @@ mod tests {
             manager_role_id: RoleId::new(12345),
             service_name: "hytale-server.service".to_owned(),
             manage_script: PathBuf::from("/opt/hytale/hytale-manage.sh"),
+            hytale_dir: PathBuf::from("/opt/hytale"),
             command_timeout: Duration::from_secs(15),
             download_timeout: Duration::from_secs(1_800),
         }
@@ -770,6 +1124,7 @@ mod tests {
                 ("HYTALE_MANAGER_ROLE_ID", Some("12345")),
                 ("HYTALE_SERVICE_NAME", None),
                 ("HYTALE_MANAGE_SCRIPT", None),
+                ("HYTALE_DIR", None),
                 ("HYTALE_COMMAND_TIMEOUT_SECONDS", None),
                 ("HYTALE_DOWNLOAD_TIMEOUT_SECONDS", None),
                 ("HOME", Some("/home/bot")),
@@ -783,6 +1138,7 @@ mod tests {
                     config.manage_script,
                     PathBuf::from("/home/bot/hytale/hytale-manage.sh")
                 );
+                assert_eq!(config.hytale_dir, PathBuf::from("/home/bot/hytale"));
                 assert_eq!(
                     config.command_timeout,
                     Duration::from_secs(DEFAULT_COMMAND_TIMEOUT_SECONDS)
@@ -819,6 +1175,7 @@ mod tests {
                 ("HYTALE_MANAGER_ROLE_ID", Some("12345")),
                 ("HYTALE_SERVICE_NAME", Some("custom-hytale.service")),
                 ("HYTALE_MANAGE_SCRIPT", Some("/srv/hytale/manage")),
+                ("HYTALE_DIR", Some("/srv/hytale/server")),
                 ("HYTALE_COMMAND_TIMEOUT_SECONDS", Some("22")),
                 ("HYTALE_DOWNLOAD_TIMEOUT_SECONDS", Some("2400")),
             ],
@@ -827,6 +1184,7 @@ mod tests {
 
                 assert_eq!(config.service_name, "custom-hytale.service");
                 assert_eq!(config.manage_script, PathBuf::from("/srv/hytale/manage"));
+                assert_eq!(config.hytale_dir, PathBuf::from("/srv/hytale/server"));
                 assert_eq!(config.command_timeout, Duration::from_secs(22));
                 assert_eq!(config.download_timeout, Duration::from_secs(2_400));
             },
@@ -1029,5 +1387,103 @@ mod tests {
 
         assert!(response.contains("Hytale update check"));
         assert!(response.contains("Update available"));
+    }
+
+    #[test]
+    fn formats_hytale_join_with_password_only_when_enabled() {
+        let disabled = HytalePasswordSettings {
+            password_enabled: false,
+            last_password: Some("secret".to_owned()),
+        };
+        assert_eq!(
+            format_hytale_join_message("203.0.113.10", &disabled),
+            "Address:\n```text\n203.0.113.10\n```"
+        );
+
+        let enabled = HytalePasswordSettings {
+            password_enabled: true,
+            last_password: Some("sec`ret".to_owned()),
+        };
+        assert_eq!(
+            format_hytale_join_message("203.0.113.10", &enabled),
+            "Address:\n```text\n203.0.113.10\n```\nPassword:\n```text\nsec`ret\n```"
+        );
+    }
+
+    #[test]
+    fn extracts_public_ip_from_plain_or_labeled_lookup_response() {
+        assert_eq!(
+            extract_public_ip("141.147.34.215").unwrap(),
+            "141.147.34.215"
+        );
+        assert_eq!(
+            extract_public_ip(
+                "IP Address: 141.147.34.215\nISP: Oracle Corporation\nCity: Frankfurt am Main\nCountry: Germany"
+            )
+            .unwrap(),
+            "141.147.34.215"
+        );
+        assert_eq!(
+            extract_public_ip("Public IP: 2001:db8::1").unwrap(),
+            "2001:db8::1"
+        );
+    }
+
+    #[tokio::test]
+    async fn writes_gratebot_password_config_and_preserves_unknown_fields() {
+        let root =
+            std::env::temp_dir().join(format!("grate-bot-hytale-config-{}", std::process::id()));
+        let server_dir = root.join("Server");
+        let config_path = server_dir.join("config.json");
+        let _ = tokio::fs::remove_dir_all(&root).await;
+        tokio::fs::create_dir_all(&server_dir).await.unwrap();
+        tokio::fs::write(
+            &config_path,
+            r#"{"bind_port":5520,"Password":"","nested":{"keep":true},"GrateBot":{"password_enabled":false,"password":"old"}}"#,
+        )
+        .await
+        .unwrap();
+
+        write_hytale_password_config(
+            &root,
+            &HytalePasswordSettings {
+                password_enabled: true,
+                last_password: Some("new-pass".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let config = read_hytale_server_config(&root).await.unwrap();
+        assert_eq!(config["bind_port"], serde_json::json!(5520));
+        assert_eq!(config["Password"], serde_json::json!("new-pass"));
+        assert_eq!(config["nested"]["keep"], serde_json::json!(true));
+        assert_eq!(
+            config["GrateBot"]["password_enabled"],
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            config["GrateBot"]["password"],
+            serde_json::json!("new-pass")
+        );
+
+        write_hytale_password_config(
+            &root,
+            &HytalePasswordSettings {
+                password_enabled: false,
+                last_password: Some("new-pass".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let config = read_hytale_server_config(&root).await.unwrap();
+        assert_eq!(config["Password"], serde_json::json!(""));
+        assert_eq!(
+            config["GrateBot"]["password"],
+            serde_json::json!("new-pass")
+        );
+
+        let _ = tokio::fs::remove_dir_all(&root).await;
     }
 }

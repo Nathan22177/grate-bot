@@ -14,6 +14,7 @@ Grateic Phone is a Discord drawing-and-prompt game. Players join from a server c
 | `/grate grateic status` | Refresh lobby status before start, or privately show in-progress round status. |
 | `/grate grateic cancel` | Cancel the active lobby before it starts. Host only. |
 | `/grate grateic force_cancel` | Force-cancel a stuck active game. Host only. |
+| `/grate grateic set-channel` | Set the only channel where Grateic commands work. |
 
 Create a lobby with:
 
@@ -52,6 +53,8 @@ Background choices:
 ## Rules
 
 Grateic Phone is played in Discord DMs after players join from a server channel. Games are stored in memory, reset when the bot restarts, and are limited to one active Grateic Phone game per server. A Discord user can only be enrolled in one active Grateic Phone game across the bot.
+
+If `/grate grateic set-channel` has been used, `/grate create` and all `/grate grateic` commands only work in that configured channel. If the configured channel is deleted, the bot clears the setting on the next Grateic command and allows Grateic commands everywhere until a new channel is set.
 
 Players are treated as ready when they join. If the bot cannot DM someone when the host starts the game, it rolls the game back to the lobby and marks that player unready. After they enable DMs from the server, they can run `/grate grateic ready`; then the host can run `/grate grateic start` again.
 
