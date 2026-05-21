@@ -665,6 +665,7 @@ async fn run_script_inner(
     let mut latest_progress = None;
     let mut latest_progress_key = None;
     let mut latest_auth_url = None;
+    let mut awaiting_auth_url = false;
 
     while !(stdout_done && stderr_done && exit_status.is_some()) {
         tokio::select! {
@@ -679,6 +680,7 @@ async fn run_script_inner(
                             &mut latest_progress,
                             &mut latest_progress_key,
                             &mut latest_auth_url,
+                            &mut awaiting_auth_url,
                         ).await?;
                     }
                     None => stdout_done = true,
@@ -695,6 +697,7 @@ async fn run_script_inner(
                             &mut latest_progress,
                             &mut latest_progress_key,
                             &mut latest_auth_url,
+                            &mut awaiting_auth_url,
                         ).await?;
                     }
                     None => stderr_done = true,
@@ -721,6 +724,7 @@ async fn handle_script_line(
     latest_progress: &mut Option<HytaleProgress>,
     latest_progress_key: &mut Option<String>,
     latest_auth_url: &mut Option<String>,
+    awaiting_auth_url: &mut bool,
 ) -> Result<(), Error> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
@@ -733,13 +737,28 @@ async fn handle_script_line(
             send_ephemeral_best_effort(ctx, format_progress_message(action, &progress)).await;
             *latest_progress_key = Some(key);
         }
+        if progress_waits_for_auth_url(&progress) {
+            *awaiting_auth_url = true;
+        }
         *latest_progress = Some(progress);
     } else {
         if matches!(
             action,
             HytaleScriptAction::CheckUpdate | HytaleScriptAction::Update
         ) {
-            maybe_send_auth_url(ctx, trimmed, latest_auth_url).await;
+            let mentions_auth = line_mentions_auth(trimmed);
+            let sent_auth_url = maybe_send_auth_url(
+                ctx,
+                trimmed,
+                latest_auth_url,
+                *awaiting_auth_url || mentions_auth,
+            )
+            .await;
+            if sent_auth_url {
+                *awaiting_auth_url = false;
+            } else if mentions_auth {
+                *awaiting_auth_url = true;
+            }
         }
         human_lines.push(line.to_owned());
     }
@@ -747,17 +766,23 @@ async fn handle_script_line(
     Ok(())
 }
 
-async fn maybe_send_auth_url(ctx: Context<'_>, line: &str, latest_auth_url: &mut Option<String>) {
-    let Some(url) = extract_first_url(line) else {
-        return;
+async fn maybe_send_auth_url(
+    ctx: Context<'_>,
+    line: &str,
+    latest_auth_url: &mut Option<String>,
+    auth_context: bool,
+) -> bool {
+    let Some(url) = extract_auth_url(line, auth_context) else {
+        return false;
     };
 
     if latest_auth_url.as_deref() == Some(url.as_str()) {
-        return;
+        return false;
     }
 
     send_ephemeral_best_effort(ctx, format!("Hytale update auth link: {url}")).await;
     *latest_auth_url = Some(url);
+    true
 }
 
 fn parse_progress_line(line: &str) -> Option<HytaleProgress> {
@@ -773,6 +798,30 @@ fn extract_first_url(line: &str) -> Option<String> {
         .to_owned();
 
     (!url.is_empty()).then_some(url)
+}
+
+fn extract_auth_url(line: &str, auth_context: bool) -> Option<String> {
+    let url = extract_first_url(line)?;
+
+    if is_downloader_bundle_url(&url) || (!auth_context && !line_mentions_auth(line)) {
+        return None;
+    }
+
+    Some(url)
+}
+
+fn line_mentions_auth(line: &str) -> bool {
+    line.to_ascii_lowercase().contains("auth")
+}
+
+fn progress_waits_for_auth_url(progress: &HytaleProgress) -> bool {
+    let progress = display_progress(progress);
+    progress.stage == "auth" || line_mentions_auth(&progress.message)
+}
+
+fn is_downloader_bundle_url(url: &str) -> bool {
+    url.trim_end_matches('/')
+        .eq_ignore_ascii_case("https://downloader.hytale.com/hytale-downloader.zip")
 }
 
 fn progress_key(progress: &HytaleProgress) -> String {
@@ -1288,14 +1337,42 @@ mod tests {
     #[test]
     fn extracts_auth_url_from_output_line() {
         assert_eq!(
-            extract_first_url("Please visit https://example.com/device?code=abc to authenticate"),
+            extract_auth_url(
+                "Please visit https://example.com/device?code=abc to authenticate",
+                false
+            ),
             Some("https://example.com/device?code=abc".to_owned())
         );
         assert_eq!(
-            extract_first_url("<https://example.com/device>,"),
+            extract_auth_url("<https://example.com/device>,", true),
             Some("https://example.com/device".to_owned())
         );
-        assert_eq!(extract_first_url("waiting for auth"), None);
+        assert_eq!(extract_auth_url("waiting for auth", false), None);
+    }
+
+    #[test]
+    fn ignores_non_auth_downloader_urls() {
+        assert_eq!(
+            extract_auth_url(
+                "Downloading https://downloader.hytale.com/hytale-downloader.zip",
+                false
+            ),
+            None
+        );
+        assert_eq!(
+            extract_auth_url(
+                "Please authenticate with https://downloader.hytale.com/hytale-downloader.zip",
+                false
+            ),
+            None
+        );
+        assert_eq!(
+            extract_auth_url(
+                "Downloading https://example.com/hytale-downloader.zip",
+                false
+            ),
+            None
+        );
     }
 
     #[test]
