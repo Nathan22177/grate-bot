@@ -661,27 +661,14 @@ async fn run_script_inner(
     let mut stdout_done = false;
     let mut stderr_done = false;
     let mut exit_status: Option<ExitStatus> = None;
-    let mut human_lines = Vec::new();
-    let mut latest_progress = None;
-    let mut latest_progress_key = None;
-    let mut latest_auth_url = None;
-    let mut awaiting_auth_url = false;
+    let mut line_state = HytaleLineState::default();
 
     while !(stdout_done && stderr_done && exit_status.is_some()) {
         tokio::select! {
             line = stdout_lines.next_line(), if !stdout_done => {
                 match line? {
                     Some(line) => {
-                        handle_script_line(
-                            ctx,
-                            action,
-                            &line,
-                            &mut human_lines,
-                            &mut latest_progress,
-                            &mut latest_progress_key,
-                            &mut latest_auth_url,
-                            &mut awaiting_auth_url,
-                        ).await?;
+                        handle_script_line(ctx, action, &line, &mut line_state).await?;
                     }
                     None => stdout_done = true,
                 }
@@ -689,16 +676,7 @@ async fn run_script_inner(
             line = stderr_lines.next_line(), if !stderr_done => {
                 match line? {
                     Some(line) => {
-                        handle_script_line(
-                            ctx,
-                            action,
-                            &line,
-                            &mut human_lines,
-                            &mut latest_progress,
-                            &mut latest_progress_key,
-                            &mut latest_auth_url,
-                            &mut awaiting_auth_url,
-                        ).await?;
+                        handle_script_line(ctx, action, &line, &mut line_state).await?;
                     }
                     None => stderr_done = true,
                 }
@@ -711,20 +689,25 @@ async fn run_script_inner(
 
     Ok(ScriptOutput {
         success: exit_status.is_some_and(|status| status.success()),
-        human_output: joined_output(&human_lines),
-        latest_progress,
+        human_output: joined_output(&line_state.human_lines),
+        latest_progress: line_state.latest_progress,
     })
+}
+
+#[derive(Default)]
+struct HytaleLineState {
+    human_lines: Vec<String>,
+    latest_progress: Option<HytaleProgress>,
+    latest_progress_key: Option<String>,
+    latest_auth_url: Option<String>,
+    awaiting_auth_url: bool,
 }
 
 async fn handle_script_line(
     ctx: Context<'_>,
     action: HytaleScriptAction,
     line: &str,
-    human_lines: &mut Vec<String>,
-    latest_progress: &mut Option<HytaleProgress>,
-    latest_progress_key: &mut Option<String>,
-    latest_auth_url: &mut Option<String>,
-    awaiting_auth_url: &mut bool,
+    state: &mut HytaleLineState,
 ) -> Result<(), Error> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
@@ -733,14 +716,14 @@ async fn handle_script_line(
 
     if let Some(progress) = parse_progress_line(trimmed) {
         let key = progress_key(&progress);
-        if latest_progress_key.as_deref() != Some(key.as_str()) {
+        if state.latest_progress_key.as_deref() != Some(key.as_str()) {
             send_ephemeral_best_effort(ctx, format_progress_message(action, &progress)).await;
-            *latest_progress_key = Some(key);
+            state.latest_progress_key = Some(key);
         }
         if progress_waits_for_auth_url(&progress) {
-            *awaiting_auth_url = true;
+            state.awaiting_auth_url = true;
         }
-        *latest_progress = Some(progress);
+        state.latest_progress = Some(progress);
     } else {
         if matches!(
             action,
@@ -750,17 +733,17 @@ async fn handle_script_line(
             let sent_auth_url = maybe_send_auth_url(
                 ctx,
                 trimmed,
-                latest_auth_url,
-                *awaiting_auth_url || mentions_auth,
+                &mut state.latest_auth_url,
+                state.awaiting_auth_url || mentions_auth,
             )
             .await;
             if sent_auth_url {
-                *awaiting_auth_url = false;
+                state.awaiting_auth_url = false;
             } else if mentions_auth {
-                *awaiting_auth_url = true;
+                state.awaiting_auth_url = true;
             }
         }
-        human_lines.push(line.to_owned());
+        state.human_lines.push(line.to_owned());
     }
 
     Ok(())
