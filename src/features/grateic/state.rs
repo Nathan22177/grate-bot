@@ -593,7 +593,7 @@ impl Game {
             return 0;
         }
 
-        if round % 2 == 0 {
+        if round.is_multiple_of(2) {
             return round / 2;
         }
 
