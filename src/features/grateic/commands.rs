@@ -144,8 +144,8 @@ pub enum HelpTopicChoice {
         "ready",
         "start",
         "status",
-        "cancel",
-        "force_cancel",
+        "cancel_lobby",
+        "cancel_game",
         "set_channel"
     )
 )]
@@ -368,8 +368,12 @@ async fn status(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-#[poise::command(slash_command)]
-async fn cancel(ctx: Context<'_>) -> Result<(), Error> {
+#[poise::command(
+    slash_command,
+    rename = "cancel-lobby",
+    description_localized("en-US", "Host only: cancel the active lobby before it starts")
+)]
+async fn cancel_lobby(ctx: Context<'_>) -> Result<(), Error> {
     if !ensure_command_channel(ctx, ChannelFamily::Grateic).await? {
         return Ok(());
     }
@@ -377,12 +381,41 @@ async fn cancel(ctx: Context<'_>) -> Result<(), Error> {
     let key = active_game_key_from_context(ctx).await?;
     let requester_id = ctx.author().id.get();
 
-    let cancelled_game = {
-        let mut games = ctx.data().grateic.games.write().await;
-        let game = games.get_mut(&key).ok_or(GameError::GameNotFound)?;
-        game.cancel(requester_id)?;
-        games.remove(&key).ok_or(GameError::GameNotFound)?
-    };
+    let cancelled_game = cancel_lobby_game(ctx.data(), key, requester_id).await?;
+
+    edit_lobby_message_for_game(
+        ctx.serenity_context(),
+        &cancelled_game,
+        "Grateic Phone lobby cancelled.",
+        Vec::new(),
+    )
+    .await?;
+    ctx.send(
+        poise::CreateReply::default()
+            .content("Grateic Phone lobby cancelled.")
+            .ephemeral(true),
+    )
+    .await?;
+    Ok(())
+}
+
+#[poise::command(
+    slash_command,
+    rename = "cancel-game",
+    description_localized(
+        "en-US",
+        "Host only: cancel the active game, including after it starts"
+    )
+)]
+async fn cancel_game(ctx: Context<'_>) -> Result<(), Error> {
+    if !ensure_command_channel(ctx, ChannelFamily::Grateic).await? {
+        return Ok(());
+    }
+
+    let key = active_game_key_from_context(ctx).await?;
+    let requester_id = ctx.author().id.get();
+
+    let cancelled_game = cancel_active_game(ctx.data(), key, requester_id).await?;
 
     edit_lobby_message_for_game(
         ctx.serenity_context(),
@@ -394,33 +427,6 @@ async fn cancel(ctx: Context<'_>) -> Result<(), Error> {
     ctx.send(
         poise::CreateReply::default()
             .content("Grateic Phone game cancelled.")
-            .ephemeral(true),
-    )
-    .await?;
-    Ok(())
-}
-
-#[poise::command(slash_command)]
-async fn force_cancel(ctx: Context<'_>) -> Result<(), Error> {
-    if !ensure_command_channel(ctx, ChannelFamily::Grateic).await? {
-        return Ok(());
-    }
-
-    let key = active_game_key_from_context(ctx).await?;
-    let requester_id = ctx.author().id.get();
-
-    let cancelled_game = force_cancel_game(ctx.data(), key, requester_id).await?;
-
-    edit_lobby_message_for_game(
-        ctx.serenity_context(),
-        &cancelled_game,
-        "Grateic Phone game force-cancelled.",
-        Vec::new(),
-    )
-    .await?;
-    ctx.send(
-        poise::CreateReply::default()
-            .content("Grateic Phone game force-cancelled.")
             .ephemeral(true),
     )
     .await?;
@@ -780,16 +786,16 @@ pub async fn handle_interaction(
             Err(error) => error.to_string(),
         },
         ButtonAction::Start => unreachable!("start buttons are deferred before dispatch"),
-        ButtonAction::Cancel => match cancel_game(data, key, user_id).await {
+        ButtonAction::Cancel => match cancel_lobby_game(data, key, user_id).await {
             Ok(game) => {
                 let _ = edit_lobby_message_for_game(
                     ctx,
                     &game,
-                    "Grateic Phone game cancelled.",
+                    "Grateic Phone lobby cancelled.",
                     Vec::new(),
                 )
                 .await;
-                "Grateic Phone game cancelled.".to_owned()
+                "Grateic Phone lobby cancelled.".to_owned()
             }
             Err(error) => error.to_string(),
         },
@@ -891,7 +897,7 @@ async fn toggle_lobby_membership(
     }
 }
 
-async fn cancel_game(data: &Data, key: GameKey, requester_id: u64) -> Result<Game, Error> {
+async fn cancel_lobby_game(data: &Data, key: GameKey, requester_id: u64) -> Result<Game, Error> {
     let mut games = data.grateic.games.write().await;
     let game = games.get_mut(&key).ok_or(GameError::GameNotFound)?;
     game.cancel(requester_id)?;
@@ -900,7 +906,7 @@ async fn cancel_game(data: &Data, key: GameKey, requester_id: u64) -> Result<Gam
         .ok_or_else(|| GameError::GameNotFound.into())
 }
 
-async fn force_cancel_game(data: &Data, key: GameKey, requester_id: u64) -> Result<Game, Error> {
+async fn cancel_active_game(data: &Data, key: GameKey, requester_id: u64) -> Result<Game, Error> {
     let mut games = data.grateic.games.write().await;
     let game = games.get_mut(&key).ok_or(GameError::GameNotFound)?;
     game.force_cancel(requester_id)?;
@@ -915,7 +921,7 @@ async fn start_game(
     key: GameKey,
     requester_id: u64,
 ) -> Result<String, Error> {
-    let (canvas, players) = {
+    let canvas = {
         let games = data.grateic.games.read().await;
         let game = games.get(&key).ok_or(GameError::GameNotFound)?;
 
@@ -939,7 +945,7 @@ async fn start_game(
             ));
         }
 
-        (game.canvas.clone(), game.players.clone())
+        game.canvas.clone()
     };
 
     let background = parse_hex_color(&canvas.background_hex).map_err(|error| anyhow!(error))?;
@@ -954,10 +960,11 @@ async fn start_game(
         require_canvas_size: canvas.require_canvas_size,
     };
 
-    let start_round = {
+    let (start_round, players) = {
         let mut games = data.grateic.games.write().await;
         let game = games.get_mut(&key).ok_or(GameError::GameNotFound)?;
-        game.start(requester_id)?
+        let start_round = game.start(requester_id)?;
+        (start_round, game.players.clone())
     };
 
     match &start_round {
@@ -1224,7 +1231,7 @@ fn lobby_control_components(key: GameKey) -> Vec<CreateActionRow> {
             .label("Start")
             .style(ButtonStyle::Primary),
         CreateButton::new(button_custom_id(ButtonAction::Cancel, key))
-            .label("Cancel")
+            .label("Cancel Lobby")
             .style(ButtonStyle::Danger),
     ])]
 }
@@ -1613,16 +1620,16 @@ fn grateic_help_text(topic: HelpTopicChoice) -> &'static str {
             "Grateic Phone help: create a lobby with `/grate create`, then players use `/grate grateic join`, and the host uses `/grate grateic start`.\n\nUse the `topic` option on `/grate grateic help` for focused help: `commands`, `create settings`, `modes`, `game flow examples`, or `canvas size rule`.\n\nDefault behavior: `/grate create` requires a mode, preset, and background. `custom_background` is only needed for `custom hex`. `require_canvas_size` defaults to enabled, so drawing uploads must match the selected canvas size unless the host turns it off."
         }
         HelpTopicChoice::Commands => {
-            "Grateic Phone commands:\n`/grate create`: create a Grateic Phone lobby. Choose `mode`, `preset`, and `background`.\n`/grate grateic join`: join the active lobby in this server.\n`/grate grateic ready`: retry the DM check if the bot could not DM you.\n`/grate grateic start`: host-only; starts the active lobby after at least 2 players join.\n`/grate grateic status`: refresh lobby status before start, or privately show in-progress round status.\n`/grate grateic cancel`: host-only; cancel the active lobby before it starts.\n`/grate grateic force_cancel`: host-only; force-cancel a stuck active game.\n`/grate grateic set-channel`: set the only channel where Grateic commands work.\n`/grate grateic help`: explain commands, settings, modes, and rules."
+            "Grateic Phone commands:\n`/grate create`: create a Grateic Phone lobby. Choose `mode`, `preset`, and `background`.\n`/grate grateic help`: explain commands, settings, modes, and rules.\n`/grate grateic join`: join the active lobby in this server.\n`/grate grateic ready`: retry the DM check if the bot could not DM you.\n`/grate grateic start`: host-only; starts the active lobby after at least 2 players join.\n`/grate grateic status`: refresh lobby status before start, or privately show in-progress round status.\n`/grate grateic cancel-lobby`: host-only; cancel the active lobby before it starts.\n`/grate grateic cancel-game`: host-only; cancel the active game, including after it starts.\n`/grate grateic set-channel`: set the only channel where Grateic commands work."
         }
         HelpTopicChoice::CreateSettings => {
             "`/grate create` settings:\n`mode`: `short` is one prompt plus one drawing. `full` is the full telephone-style chain game.\n`preset`: canvas size. `square` is 1024x1024, `portrait` is 1080x1920, `landscape` is 1920x1080.\n`background`: canvas background color preset. Choose `custom hex` only when you want your own color.\n`custom_background`: required only when `background` is `custom hex`; use `#RRGGBB`, like `#ff00aa`.\n`require_canvas_size`: optional. Defaults to `true`. When `false`, drawing uploads can use any image size."
         }
         HelpTopicChoice::Modes => {
-            "Grateic Phone modes:\n`short`: everyone submits one prompt, then each player gets one prompt from another player, uploads one drawing, and the bot reveals showcases.\n`full`: everyone submits an initial prompt, chains rotate through alternating drawing and prompt rounds, then each original author names the final drawing before reveal.\n\nBoth modes use DMs for submissions. Both modes send the selected blank canvas at start. Both modes use the same canvas size rule."
+            "Grateic Phone modes:\n`short`: everyone submits one prompt, then each player gets one prompt from another player, uploads one drawing, and the bot reveals showcases.\n`full`: everyone submits an initial prompt, every player contributes one prompt/description and one drawing to every chain, then each original author names the final drawing before reveal.\n\nWhen the host starts a game, the bot shuffles the player order once and assignments use that shuffled order. Both modes use DMs for submissions. Both modes send the selected blank canvas at start. Both modes use the same canvas size rule."
         }
         HelpTopicChoice::GameFlowExamples => {
-            "Example short flow with 3 players:\n1. A, B, and C each submit one prompt.\n2. A draws C's prompt, B draws A's prompt, C draws B's prompt.\n3. After all drawings are uploaded, the bot posts each prompt with its drawing as showcases.\n\nExample full flow with 3 players:\n1. A, B, and C each submit an initial prompt.\n2. Next round, each player draws a different prompt.\n3. Next round, each player describes a drawing for the next player.\n4. Drawing and prompt rounds keep rotating.\n5. Final round, original authors name the final drawing from their chain.\n6. The bot reveals every chain."
+            "Example short flow with 3 players:\n1. A, B, and C each submit one prompt.\n2. The bot shuffles the player order, then each player draws another player's prompt.\n3. After all drawings are uploaded, the bot posts each prompt with its drawing as showcases.\n\nExample full flow with 3 players:\n1. A, B, and C each submit an initial prompt.\n2. Next round, each player draws a different prompt.\n3. Next round, each player describes a drawing for another player.\n4. Drawing and prompt rounds continue through the shuffled player order until every player has described and drawn every chain once.\n5. Final round, original authors name the final drawing from their chain.\n6. The bot reveals every chain."
         }
         HelpTopicChoice::CanvasSizeRule => {
             "Canvas size rule:\nBy default, `require_canvas_size` is enabled. Drawing uploads must exactly match the canvas preset chosen in `/grate create`.\n\nPreset sizes: `square` 1024x1024, `portrait` 1080x1920, `landscape` 1920x1080.\n\nIf a submitted image is the wrong size, the bot rejects it and tells the player the expected and actual dimensions. If Discord does not report dimensions, the bot asks for a normal image upload whose dimensions Discord can detect.\n\nTo disable this rule for a lobby, set `require_canvas_size:false` when creating it."
@@ -1750,6 +1757,28 @@ mod tests {
     }
 
     #[test]
+    fn help_text_matches_command_behavior() {
+        let commands = grateic_help_text(HelpTopicChoice::Commands);
+
+        assert!(commands.contains("`/grate create`: create a Grateic Phone lobby"));
+        assert!(commands.contains("`/grate grateic help`: explain commands"));
+        assert!(commands.contains(
+            "`/grate grateic start`: host-only; starts the active lobby after at least 2 players join"
+        ));
+        assert!(commands.contains(
+            "`/grate grateic cancel-lobby`: host-only; cancel the active lobby before it starts"
+        ));
+        assert!(commands.contains(
+            "`/grate grateic cancel-game`: host-only; cancel the active game, including after it starts"
+        ));
+        assert!(commands.contains(
+            "`/grate grateic set-channel`: set the only channel where Grateic commands work"
+        ));
+        assert!(!commands.contains("`/grate grateic cancel`:"));
+        assert!(!commands.contains("`/grate grateic force_cancel`:"));
+    }
+
+    #[test]
     fn dm_status_reports_requester_submission_state() {
         let mut game = game_with_players(2);
         game.start(1).unwrap();
@@ -1798,16 +1827,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn normal_cancel_is_lobby_only_and_force_cancel_handles_started_game() {
+    async fn cancel_lobby_is_lobby_only_and_cancel_game_handles_started_game() {
         let data = Data::default();
         let mut game = game_with_players(2);
         game.start(1).unwrap();
         insert_game(&data, game).await;
 
-        let error = cancel_game(&data, test_key(), 1).await.unwrap_err();
+        let error = cancel_lobby_game(&data, test_key(), 1).await.unwrap_err();
         assert!(error.to_string().contains("already started"));
 
-        force_cancel_game(&data, test_key(), 1).await.unwrap();
+        cancel_active_game(&data, test_key(), 1).await.unwrap();
         assert!(data.grateic.games.read().await.get(&test_key()).is_none());
     }
 }

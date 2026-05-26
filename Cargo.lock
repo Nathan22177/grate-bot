@@ -602,6 +602,7 @@ dependencies = [
  "dotenvy",
  "image",
  "poise",
+ "rand",
  "reqwest",
  "serde",
  "serde_json",

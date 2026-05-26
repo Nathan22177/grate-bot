@@ -1,6 +1,6 @@
 # Hytale Management
 
-Hytale management lets trusted Discord helpers check, manage, and update a co-hosted Hytale service from Discord. The bot does not run arbitrary shell commands; it calls one local management script with one allowlisted action.
+Hytale management lets Discord members check a co-hosted Hytale service and lets trusted helpers manage and update it from Discord. The bot does not run arbitrary shell commands; it calls one local management script with one allowlisted action.
 
 ## Commands
 
@@ -10,16 +10,16 @@ Hytale management lets trusted Discord helpers check, manage, and update a co-ho
 | `/grate hytale join` | Print public server address and the active password when password protection is enabled. |
 | `/grate hytale status` | Check the Hytale service status. |
 | `/grate hytale logs` | Show recent service logs. |
-| `/grate hytale start` | Start the Hytale service. |
-| `/grate hytale stop` | Stop the Hytale service. |
-| `/grate hytale restart` | Restart the Hytale service. |
+| `/grate hytale start` | Start the Hytale service. Manager role only. |
+| `/grate hytale stop` | Stop the Hytale service. Manager role only. |
+| `/grate hytale restart` | Restart the Hytale service. Manager role only. |
 | `/grate hytale check-update` | Check whether a Hytale server update is available without applying it. |
-| `/grate hytale update` | Update the Hytale server and restart it. |
+| `/grate hytale update` | Update the Hytale server and restart it. Manager role only. |
 | `/grate hytale set-channel` | Set the only channel where Hytale commands work. Manager role only. |
 | `/grate hytale set-password` | Set and enable the Hytale server password. Manager role only. |
 | `/grate hytale toggle-password` | Turn Hytale password protection on or off. Manager role only. |
 
-Operational Hytale command responses are ephemeral and require the configured Hytale manager role. `/grate hytale help` and `/grate hytale join` are available without that role so people can discover setup and join information. If `/grate hytale set-channel` has been used, all Hytale commands only work in that configured channel. If the configured channel is deleted, the bot clears the setting on the next Hytale command and allows Hytale commands everywhere until a new channel is set.
+Operational Hytale command responses are ephemeral. `/grate hytale help`, `join`, `status`, `logs`, and `check-update` are available without the Hytale manager role so people can discover setup, join information, and read-only server state. Commands that change server state or settings require the configured Hytale manager role. If `/grate hytale set-channel` has been used, all Hytale commands only work in that configured channel. If the configured channel is deleted, the bot clears the setting on the next Hytale command and allows Hytale commands everywhere until a new channel is set.
 
 ## Script Contract
 
@@ -133,7 +133,7 @@ Deployment and service setup details live in [../MAINTAINER_SETUP.md](../MAINTAI
 ## Troubleshooting
 
 - If commands say controls are not set up, set `HYTALE_MANAGER_ROLE_ID`.
-- If you lack permission, ask for the configured Hytale manager role.
+- If you lack permission for a manager-only command, ask for the configured Hytale manager role.
 - If a command fails to start, check `HYTALE_MANAGE_SCRIPT` and make sure the script exists and is executable by the bot user. For repo paths under `/home/ubuntu`, deploy should install `acl` and grant access automatically; if apt is misconfigured or blocked, move the checkout under `/srv/grate-bot` or `/opt/grate-bot`.
 - If a script action fails with `sudo: a password is required`, configure passwordless sudo for the bot host user and verify it with `sudo -u BOT_USER sudo -n systemctl status hytale-server.service --no-pager`.
 - If a script action fails for another reason, check host sudoers, systemd permissions, journal access, and the script output shown in Discord.

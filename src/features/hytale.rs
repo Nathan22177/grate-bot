@@ -223,7 +223,7 @@ async fn logs(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(
     slash_command,
-    description_localized("en-US", "Start the Hytale service")
+    description_localized("en-US", "Manager only: start the Hytale service")
 )]
 async fn start(ctx: Context<'_>) -> Result<(), Error> {
     run_hytale_command(ctx, HytaleScriptAction::Start).await
@@ -231,7 +231,7 @@ async fn start(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(
     slash_command,
-    description_localized("en-US", "Stop the Hytale service")
+    description_localized("en-US", "Manager only: stop the Hytale service")
 )]
 async fn stop(ctx: Context<'_>) -> Result<(), Error> {
     run_hytale_command(ctx, HytaleScriptAction::Stop).await
@@ -239,7 +239,7 @@ async fn stop(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(
     slash_command,
-    description_localized("en-US", "Restart the Hytale service")
+    description_localized("en-US", "Manager only: restart the Hytale service")
 )]
 async fn restart(ctx: Context<'_>) -> Result<(), Error> {
     run_hytale_command(ctx, HytaleScriptAction::Restart).await
@@ -256,7 +256,7 @@ async fn check_update(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(
     slash_command,
-    description_localized("en-US", "Update the Hytale server and restart it")
+    description_localized("en-US", "Manager only: update the Hytale server and restart it")
 )]
 async fn update(ctx: Context<'_>) -> Result<(), Error> {
     run_hytale_command(ctx, HytaleScriptAction::Update).await
@@ -265,7 +265,10 @@ async fn update(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(
     slash_command,
     rename = "set-channel",
-    description_localized("en-US", "Set the only channel where Hytale commands work")
+    description_localized(
+        "en-US",
+        "Manager only: set the only channel where Hytale commands work"
+    )
 )]
 async fn set_channel(
     ctx: Context<'_>,
@@ -274,7 +277,7 @@ async fn set_channel(
     if !ensure_command_channel(ctx, ChannelFamily::Hytale).await? {
         return Ok(());
     }
-    let Some(_config) = hytale_config_for(ctx).await? else {
+    let Some(_config) = hytale_config_for(ctx, HytaleAccess::Manager).await? else {
         return Ok(());
     };
     let Some(guild_id) = ctx.guild_id() else {
@@ -299,7 +302,7 @@ async fn set_channel(
 #[poise::command(
     slash_command,
     rename = "set-password",
-    description_localized("en-US", "Set and enable the Hytale server password")
+    description_localized("en-US", "Manager only: set and enable the Hytale server password")
 )]
 async fn set_password(
     ctx: Context<'_>,
@@ -308,7 +311,7 @@ async fn set_password(
     if !ensure_command_channel(ctx, ChannelFamily::Hytale).await? {
         return Ok(());
     }
-    let Some(config) = hytale_config_for(ctx).await? else {
+    let Some(config) = hytale_config_for(ctx, HytaleAccess::Manager).await? else {
         return Ok(());
     };
     let Some(guild_id) = ctx.guild_id() else {
@@ -348,13 +351,13 @@ async fn set_password(
 #[poise::command(
     slash_command,
     rename = "toggle-password",
-    description_localized("en-US", "Toggle Hytale server password protection")
+    description_localized("en-US", "Manager only: toggle Hytale server password protection")
 )]
 async fn toggle_password(ctx: Context<'_>) -> Result<(), Error> {
     if !ensure_command_channel(ctx, ChannelFamily::Hytale).await? {
         return Ok(());
     }
-    let Some(config) = hytale_config_for(ctx).await? else {
+    let Some(config) = hytale_config_for(ctx, HytaleAccess::Manager).await? else {
         return Ok(());
     };
     let Some(guild_id) = ctx.guild_id() else {
@@ -416,7 +419,7 @@ async fn run_hytale_command(ctx: Context<'_>, action: HytaleScriptAction) -> Res
         return Ok(());
     }
 
-    let Some(config) = hytale_config_for(ctx).await? else {
+    let Some(config) = hytale_config_for(ctx, action.access()).await? else {
         return Ok(());
     };
 
@@ -466,7 +469,10 @@ async fn restart_after_password_change(
     Ok(())
 }
 
-async fn hytale_config_for(ctx: Context<'_>) -> Result<Option<HytaleConfig>, Error> {
+async fn hytale_config_for(
+    ctx: Context<'_>,
+    access: HytaleAccess,
+) -> Result<Option<HytaleConfig>, Error> {
     if ctx.guild_id().is_none() {
         ctx.send(
             poise::CreateReply::default()
@@ -490,27 +496,37 @@ async fn hytale_config_for(ctx: Context<'_>) -> Result<Option<HytaleConfig>, Err
         }
     };
 
-    let Some(member) = ctx.author_member().await else {
-        ctx.send(
-            poise::CreateReply::default()
-                .content("I could not verify your server roles, so I cannot run Hytale controls.")
-                .ephemeral(true),
-        )
-        .await?;
-        return Ok(None);
-    };
+    if access == HytaleAccess::Manager {
+        let Some(member) = ctx.author_member().await else {
+            ctx.send(
+                poise::CreateReply::default()
+                    .content(
+                        "I could not verify your server roles, so I cannot run Hytale controls.",
+                    )
+                    .ephemeral(true),
+            )
+            .await?;
+            return Ok(None);
+        };
 
-    if !member_has_role(&member, config.manager_role_id) {
-        ctx.send(
-            poise::CreateReply::default()
-                .content("You do not have Hytale server manager permission.")
-                .ephemeral(true),
-        )
-        .await?;
-        return Ok(None);
+        if !member_has_role(&member, config.manager_role_id) {
+            ctx.send(
+                poise::CreateReply::default()
+                    .content("You do not have Hytale server manager permission.")
+                    .ephemeral(true),
+            )
+            .await?;
+            return Ok(None);
+        }
     }
 
     Ok(Some(config))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HytaleAccess {
+    PublicReadOnly,
+    Manager,
 }
 
 fn member_has_role(member: &serenity::Member, role_id: RoleId) -> bool {
@@ -539,6 +555,13 @@ impl HytaleScriptAction {
         Self::CheckUpdate,
         Self::Update,
     ];
+
+    fn access(self) -> HytaleAccess {
+        match self {
+            Self::Status | Self::Logs | Self::CheckUpdate => HytaleAccess::PublicReadOnly,
+            Self::Start | Self::Stop | Self::Restart | Self::Update => HytaleAccess::Manager,
+        }
+    }
 
     fn arg(self) -> &'static str {
         match self {
@@ -1085,22 +1108,22 @@ fn truncate_inline(value: &str, max_chars: usize) -> String {
 fn hytale_help_text(topic: HytaleHelpTopicChoice) -> &'static str {
     match topic {
         HytaleHelpTopicChoice::Overview => {
-            "Hytale help: these commands let trusted server helpers check, manage, and update the hosted Hytale server. Everyone can use `/grate hytale join` for public join info.\n\nUse the `topic` option on `/grate hytale help` for focused help: `commands`, `settings`, `permissions`, `operations flow`, or `troubleshooting`.\n\nDefault behavior: the bot calls `~/hytale/hytale-manage.sh`, manages `hytale-server.service`, waits up to 15 seconds for regular commands, and waits up to 1800 seconds for update checks and updates unless the bot owner configured different environment variables. Management commands require the Hytale manager role."
+            "Hytale help: these commands let people check the hosted Hytale server and let trusted server helpers manage and update it. Everyone can use `/grate hytale join`, `status`, `logs`, and `check-update`; commands that change the server require the Hytale manager role.\n\nUse the `topic` option on `/grate hytale help` for focused help: `commands`, `settings`, `permissions`, `operations flow`, or `troubleshooting`.\n\nDefault behavior: the bot calls `~/hytale/hytale-manage.sh`, manages `hytale-server.service`, waits up to 15 seconds for regular commands, and waits up to 1800 seconds for update checks and updates unless the bot owner configured different environment variables."
         }
         HytaleHelpTopicChoice::Commands => {
-            "Hytale commands:\n`/grate hytale help`: explain commands, settings, permissions, and troubleshooting.\n`/grate hytale join`: print public server address and password when enabled.\n`/grate hytale status`: checks the service status using the management script.\n`/grate hytale logs`: shows recent service logs using the management script.\n`/grate hytale start`: starts the server.\n`/grate hytale stop`: stops the server.\n`/grate hytale restart`: restarts the server.\n`/grate hytale check-update`: checks whether a server update is available without applying it.\n`/grate hytale update`: stops the server if needed, updates it, and starts it again.\n`/grate hytale set-channel`: set the only channel where Hytale commands work.\n`/grate hytale set-password`: set and enable the server password.\n`/grate hytale toggle-password`: turn password protection on or off.\n\nManager commands are ephemeral and require the configured manager role."
+            "Hytale commands:\n`/grate hytale help`: explain commands, settings, permissions, and troubleshooting.\n`/grate hytale join`: print public server address and password when enabled.\n`/grate hytale status`: checks the service status using the management script.\n`/grate hytale logs`: shows recent service logs using the management script.\n`/grate hytale start`: starts the server. Manager role only.\n`/grate hytale stop`: stops the server. Manager role only.\n`/grate hytale restart`: restarts the server. Manager role only.\n`/grate hytale check-update`: checks whether a server update is available without applying it.\n`/grate hytale update`: stops the server if needed, updates it, and starts it again. Manager role only.\n`/grate hytale set-channel`: set the only channel where Hytale commands work. Manager role only.\n`/grate hytale set-password`: set and enable the server password. Manager role only.\n`/grate hytale toggle-password`: turn password protection on or off. Manager role only.\n\nOperational responses are ephemeral. Manager commands require the configured manager role."
         }
         HytaleHelpTopicChoice::Settings => {
             "Hytale settings for the bot owner:\n`HYTALE_MANAGER_ROLE_ID`: required Discord role ID allowed to use Hytale controls.\n`HYTALE_MANAGE_SCRIPT`: optional path to `hytale-manage.sh`. Defaults to `~/hytale/hytale-manage.sh`.\n`HYTALE_DIR`: optional Hytale install directory containing `Server/config.json`. Defaults to `~/hytale`.\n`HYTALE_SERVICE_NAME`: optional systemd service name passed to the script as `SERVICE_NAME`. Defaults to `hytale-server.service`.\n`HYTALE_COMMAND_TIMEOUT_SECONDS`: optional timeout for status, logs, start, stop, and restart. Defaults to 15 seconds, with a minimum of 1 second.\n`HYTALE_DOWNLOAD_TIMEOUT_SECONDS`: optional timeout for `/grate hytale check-update` and `/grate hytale update`, also passed to the script as `DOWNLOAD_TIMEOUT_SECONDS`. Defaults to 1800 seconds, with a minimum of 1 second.\n\nIf the required role ID is missing or invalid, management commands explain the setup problem instead of running."
         }
         HytaleHelpTopicChoice::Permissions => {
-            "Hytale permissions:\nOnly members with the configured Hytale manager role can run `status`, `logs`, `start`, `stop`, `restart`, `check-update`, `update`, `set-channel`, `set-password`, or `toggle-password`.\n\nThe bot only calls the configured `hytale-manage.sh` script with one of those fixed service actions. The script handles systemd, logs, sudo, and update work on the host.\n\nThe help and join commands are available without the manager role so people can discover how the controls work and connect to the server."
+            "Hytale permissions:\nEveryone can run `help`, `join`, `status`, `logs`, and `check-update` in the configured Hytale channel. Only members with the configured Hytale manager role can run `start`, `stop`, `restart`, `update`, `set-channel`, `set-password`, or `toggle-password`.\n\nThe bot only calls the configured `hytale-manage.sh` script with one of those fixed service actions. The script handles systemd, logs, sudo, and update work on the host.\n\nRead-only commands let people see server state; manager-only commands can change the server."
         }
         HytaleHelpTopicChoice::OperationsFlow => {
             "Typical Hytale operations flow:\n1. Run `/grate hytale status` to see whether the service is active or failed.\n2. If players report issues, run `/grate hytale logs` and scan recent output.\n3. Use `/grate hytale start` only when the server is stopped.\n4. Use `/grate hytale restart` when the server is wedged and logs/status suggest a restart is appropriate.\n5. Use `/grate hytale stop` when intentionally taking the server offline.\n6. Use `/grate hytale check-update` to see whether a new server build is available.\n7. Use `/grate hytale update` when applying a new server build.\n8. Re-check `/grate hytale status` after start, stop, restart, or update."
         }
         HytaleHelpTopicChoice::Troubleshooting => {
-            "Hytale troubleshooting:\nIf commands say controls are not set up, the bot owner needs to set `HYTALE_MANAGER_ROLE_ID`.\nIf you lack permission, ask for the configured Hytale manager role.\nIf a command fails to start, check `HYTALE_MANAGE_SCRIPT` and make sure the script exists and is executable by the bot user.\nIf a script action fails, check host sudoers, systemd permissions, journal access, and the script output shown in Discord.\nIf update waits for auth, complete the Hytale downloader authorization flow on the host.\nIf output is trimmed, use host access for deeper investigation; Discord replies intentionally cap long command output."
+            "Hytale troubleshooting:\nIf commands say controls are not set up, the bot owner needs to set `HYTALE_MANAGER_ROLE_ID`.\nIf you lack permission for a manager-only command, ask for the configured Hytale manager role.\nIf a command fails to start, check `HYTALE_MANAGE_SCRIPT` and make sure the script exists and is executable by the bot user.\nIf a script action fails, check host sudoers, systemd permissions, journal access, and the script output shown in Discord.\nIf update waits for auth, complete the Hytale downloader authorization flow on the host.\nIf output is trimmed, use host access for deeper investigation; Discord replies intentionally cap long command output."
         }
     }
 }
@@ -1243,6 +1266,57 @@ mod tests {
                 vec!["update".to_owned()],
             ]
         );
+    }
+
+    #[test]
+    fn action_access_marks_only_read_only_actions_public() {
+        let access = HytaleScriptAction::ALL
+            .into_iter()
+            .map(|action| (action.arg(), action.access()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            access,
+            vec![
+                ("status", HytaleAccess::PublicReadOnly),
+                ("logs", HytaleAccess::PublicReadOnly),
+                ("start", HytaleAccess::Manager),
+                ("stop", HytaleAccess::Manager),
+                ("restart", HytaleAccess::Manager),
+                ("check-update", HytaleAccess::PublicReadOnly),
+                ("update", HytaleAccess::Manager),
+            ]
+        );
+    }
+
+    #[test]
+    fn help_text_matches_read_only_and_manager_command_split() {
+        let commands = hytale_help_text(HytaleHelpTopicChoice::Commands);
+        let permissions = hytale_help_text(HytaleHelpTopicChoice::Permissions);
+
+        assert!(commands.contains("`/grate hytale status`: checks the service status"));
+        assert!(commands.contains("`/grate hytale logs`: shows recent service logs"));
+        assert!(
+            commands.contains(
+                "`/grate hytale check-update`: checks whether a server update is available"
+            )
+        );
+        assert!(!commands.contains(
+            "status`: checks the service status using the management script. Manager role only"
+        ));
+        assert!(!commands.contains(
+            "logs`: shows recent service logs using the management script. Manager role only"
+        ));
+        assert!(!commands.contains("check-update`: checks whether a server update is available without applying it. Manager role only"));
+        assert!(commands.contains("`/grate hytale start`: starts the server. Manager role only"));
+        assert!(commands.contains("`/grate hytale update`: stops the server if needed, updates it, and starts it again. Manager role only"));
+        assert!(
+            permissions
+                .contains("Everyone can run `help`, `join`, `status`, `logs`, and `check-update`")
+        );
+        assert!(permissions.contains(
+            "Only members with the configured Hytale manager role can run `start`, `stop`, `restart`, `update`, `set-channel`, `set-password`, or `toggle-password`"
+        ));
     }
 
     #[test]

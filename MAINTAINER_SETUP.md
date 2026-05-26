@@ -146,7 +146,7 @@ The repository scripts must be executable:
 chmod +x deploy/hytale-manage.sh deploy/hytale-update.sh deploy/hytale-downloader-update.sh
 ```
 
-Only users with the configured Discord role can run Hytale management commands. Set this to the Discord role ID for trusted Hytale managers:
+Only users with the configured Discord role can run Hytale commands that change server state or settings. Read-only Hytale commands such as `status`, `logs`, and `check-update` are available without this role. Set this to the Discord role ID for trusted Hytale managers:
 
 ```sh
 HYTALE_MANAGER_ROLE_ID=123456789012345678
