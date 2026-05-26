@@ -27,8 +27,8 @@ Use `/grate verify` to compare the running executable SHA-256 against the checks
 | `/grate grateic ready` | Retry the DM readiness check after fixing DMs. |
 | `/grate grateic start` | Start the active lobby. Host only. |
 | `/grate grateic status` | Refresh lobby status before start, or privately show in-progress round status. |
-| `/grate grateic cancel` | Cancel the active lobby before it starts. Host only. |
-| `/grate grateic force_cancel` | Force-cancel a stuck active game. Host only. |
+| `/grate grateic cancel-lobby` | Cancel the active lobby before it starts. Host only. |
+| `/grate grateic cancel-game` | Cancel the active game, including after it starts. Host only. |
 | `/grate grateic set-channel` | Set the only channel where Grateic commands work. |
 
 Full Grateic Phone rules, setup options, modes, canvas settings, and validation details live in [docs/GRATEIC.md](docs/GRATEIC.md).
@@ -41,16 +41,16 @@ Full Grateic Phone rules, setup options, modes, canvas settings, and validation 
 | `/grate hytale join` | Print public Hytale server join info. |
 | `/grate hytale status` | Check the Hytale service status. |
 | `/grate hytale logs` | Show recent service logs. |
-| `/grate hytale start` | Start the Hytale service. |
-| `/grate hytale stop` | Stop the Hytale service. |
-| `/grate hytale restart` | Restart the Hytale service. |
+| `/grate hytale start` | Start the Hytale service. Manager role only. |
+| `/grate hytale stop` | Stop the Hytale service. Manager role only. |
+| `/grate hytale restart` | Restart the Hytale service. Manager role only. |
 | `/grate hytale check-update` | Check whether a Hytale server update is available without applying it. |
-| `/grate hytale update` | Update the Hytale server and restart it. |
+| `/grate hytale update` | Update the Hytale server and restart it. Manager role only. |
 | `/grate hytale set-channel` | Set the only channel where Hytale commands work. Manager role only. |
 | `/grate hytale set-password` | Set and enable the Hytale server password. Manager role only. |
 | `/grate hytale toggle-password` | Turn Hytale password protection on or off. Manager role only. |
 
-Hytale management commands require the configured Hytale manager role. The feature overview, runtime settings, script contract, and operations flow live in [docs/HYTALE.md](docs/HYTALE.md).
+Hytale commands that change server state require the configured Hytale manager role. The feature overview, runtime settings, script contract, and operations flow live in [docs/HYTALE.md](docs/HYTALE.md).
 
 ## Maintainers
 

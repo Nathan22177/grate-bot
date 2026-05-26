@@ -12,8 +12,8 @@ Grateic Phone is a Discord drawing-and-prompt game. Players join from a server c
 | `/grate grateic ready` | Retry the DM readiness check after fixing DMs. |
 | `/grate grateic start` | Start the active lobby. Host only. |
 | `/grate grateic status` | Refresh lobby status before start, or privately show in-progress round status. |
-| `/grate grateic cancel` | Cancel the active lobby before it starts. Host only. |
-| `/grate grateic force_cancel` | Force-cancel a stuck active game. Host only. |
+| `/grate grateic cancel-lobby` | Cancel the active lobby before it starts. Host only. |
+| `/grate grateic cancel-game` | Cancel the active game, including after it starts. Host only. |
 | `/grate grateic set-channel` | Set the only channel where Grateic commands work. |
 
 Create a lobby with:
@@ -54,11 +54,13 @@ Background choices:
 
 Grateic Phone is played in Discord DMs after players join from a server channel. Games are stored in memory, reset when the bot restarts, and are limited to one active Grateic Phone game per server. A Discord user can only be enrolled in one active Grateic Phone game across the bot.
 
+When the host starts a game, the bot shuffles the player order once for that game. Short and full mode assignments use that shuffled order, so repeated games with the same players do not always use the same pairings. In full mode, every player contributes one prompt/description and one drawing to every chain; the original prompt author also names their final image at the end.
+
 If `/grate grateic set-channel` has been used, `/grate create` and all `/grate grateic` commands only work in that configured channel. If the configured channel is deleted, the bot clears the setting on the next Grateic command and allows Grateic commands everywhere until a new channel is set.
 
 Players are treated as ready when they join. If the bot cannot DM someone when the host starts the game, it rolls the game back to the lobby and marks that player unready. After they enable DMs from the server, they can run `/grate grateic ready`; then the host can run `/grate grateic start` again.
 
-The original lobby message is continuously updated with lobby status, joined players, readiness, canvas settings, and start requirements. Lobby controls include `Join / Leave`, `Status`, `Start`, and `Cancel`; `Start` and `Cancel` remain host-only. DM assignment messages include a `Status` button for checking in-progress round completion without returning to the server channel. Reveals are posted in the channel where `/grate create` was run.
+The original lobby message is continuously updated with lobby status, joined players, readiness, canvas settings, and start requirements. Lobby controls include `Join / Leave`, `Status`, `Start`, and `Cancel Lobby`; `Start` and `Cancel Lobby` remain host-only. `/grate grateic cancel-game` is also host-only and can remove the active game even after it starts. DM assignment messages include a `Status` button for checking in-progress round completion without returning to the server channel. Reveals are posted in the channel where `/grate create` was run.
 
 ## Short Mode
 
@@ -72,7 +74,7 @@ Short mode is the fast showcase flow:
 Example with 3 players:
 
 1. A, B, and C submit prompts.
-2. A draws C's prompt, B draws A's prompt, and C draws B's prompt.
+2. The bot shuffles the player order, then each player draws another player's prompt.
 3. The bot posts the three showcases.
 
 ## Full Mode
@@ -82,7 +84,7 @@ Full mode is the telephone-style chain flow:
 1. Every player submits an initial prompt.
 2. Players draw prompts.
 3. Players describe drawings.
-4. Drawing and prompt rounds alternate as chains rotate.
+4. Drawing and prompt rounds alternate through the shuffled player order, with everyone contributing one prompt/description and one drawing to every chain.
 5. The original prompt author receives the final drawing and gives it a name.
 6. The bot reveals every chain.
 

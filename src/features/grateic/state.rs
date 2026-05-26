@@ -1,4 +1,5 @@
 use super::canvas::CanvasPreset;
+use rand::{seq::SliceRandom, thread_rng};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -278,6 +279,16 @@ impl Game {
     }
 
     pub fn start(&mut self, requester_id: u64) -> Result<StartRound, GameError> {
+        let mut rng = thread_rng();
+        let players = shuffled_player_order(&self.players, &mut rng);
+        self.start_with_player_order(requester_id, players)
+    }
+
+    fn start_with_player_order(
+        &mut self,
+        requester_id: u64,
+        players: Vec<u64>,
+    ) -> Result<StartRound, GameError> {
         if requester_id != self.host_id {
             return Err(GameError::NotHost);
         }
@@ -295,6 +306,7 @@ impl Game {
         }
 
         self.phase = GamePhase::InProgress;
+        self.players = players;
         self.current_round = 0;
         self.submitted_this_round.clear();
 
@@ -571,7 +583,23 @@ impl Game {
     }
 
     fn chain_index_for(&self, player_index: usize, round: usize) -> usize {
-        (player_index + self.players.len() - (round % self.players.len())) % self.players.len()
+        let player_count = self.players.len();
+        let author_offset = self.chain_author_offset_for_round(round);
+        (player_index + player_count - author_offset) % player_count
+    }
+
+    fn chain_author_offset_for_round(&self, round: usize) -> usize {
+        if round + 1 == self.total_rounds() {
+            return 0;
+        }
+
+        if round.is_multiple_of(2) {
+            return round / 2;
+        }
+
+        let player_count = self.players.len();
+        let drawing_shift = if player_count == 2 { 1 } else { 2 };
+        ((round - 1) / 2 + drawing_shift) % player_count
     }
 
     fn assigned_chain_index(&self, player_index: usize) -> usize {
@@ -724,6 +752,12 @@ impl Game {
     }
 }
 
+fn shuffled_player_order<R: rand::Rng + ?Sized>(players: &[u64], rng: &mut R) -> Vec<u64> {
+    let mut shuffled = players.to_vec();
+    shuffled.shuffle(rng);
+    shuffled
+}
+
 fn validate_text_submission(text: String) -> Result<String, GameError> {
     let text = text.trim().to_owned();
     if text.chars().count() > 140 {
@@ -736,6 +770,7 @@ fn validate_text_submission(text: String) -> Result<String, GameError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::{SeedableRng, rngs::StdRng};
 
     fn game_with_players(count: u64) -> Game {
         let mut game = Game::new(
@@ -785,11 +820,24 @@ mod tests {
         }
     }
 
+    fn start_in_join_order(game: &mut Game) -> StartRound {
+        game.start_with_player_order(1, game.players.clone())
+            .unwrap()
+    }
+
     #[test]
     fn each_chain_alternates_text_and_drawing_until_author_names_final_image() {
-        for count in [2, 3, 5] {
+        for count in [2, 3, 4, 5, 6] {
             let mut game = game_with_players(count);
-            game.start(1).unwrap();
+            let player_order = match count {
+                3 => vec![2, 3, 1],
+                4 => vec![3, 1, 4, 2],
+                5 => vec![4, 1, 5, 2, 3],
+                6 => vec![6, 2, 4, 1, 5, 3],
+                _ => game.players.clone(),
+            };
+            game.start_with_player_order(1, player_order.clone())
+                .unwrap();
 
             for round in 0..game.total_rounds() {
                 let assignments = game.assignments_for_current_round();
@@ -820,8 +868,9 @@ mod tests {
             }
 
             assert_eq!(game.phase, GamePhase::Finished);
-            for chain in &game.chains {
+            for (chain_index, chain) in game.chains.iter().enumerate() {
                 assert_eq!(chain.entries.len(), game.total_rounds());
+                assert_eq!(chain.original_player_id, player_order[chain_index]);
                 assert_eq!(
                     chain.entries.first().unwrap().author_id,
                     chain.original_player_id
@@ -839,35 +888,50 @@ mod tests {
                     SubmissionKind::Name(_)
                 ));
 
+                let mut prompt_authors = Vec::new();
+                let mut drawing_authors = Vec::new();
                 for (entry_index, entry) in chain.entries.iter().enumerate() {
-                    assert_eq!(
-                        entry.author_id,
-                        ((chain.original_player_id - 1 + entry_index as u64) % count) + 1
-                    );
-
                     match entry_index {
-                        0 => assert!(matches!(entry.kind, SubmissionKind::Prompt(_))),
+                        0 => {
+                            assert!(matches!(entry.kind, SubmissionKind::Prompt(_)));
+                            prompt_authors.push(entry.author_id);
+                        }
                         index if index + 1 == count as usize * 2 + 1 => {
                             assert!(matches!(entry.kind, SubmissionKind::Name(_)))
                         }
                         index if index % 2 == 1 => {
-                            assert!(matches!(entry.kind, SubmissionKind::Drawing { .. }))
+                            assert!(matches!(entry.kind, SubmissionKind::Drawing { .. }));
+                            drawing_authors.push(entry.author_id);
                         }
-                        _ => assert!(matches!(entry.kind, SubmissionKind::Prompt(_))),
+                        _ => {
+                            assert!(matches!(entry.kind, SubmissionKind::Prompt(_)));
+                            prompt_authors.push(entry.author_id);
+                        }
                     }
                 }
 
-                let drawing_authors = chain
-                    .entries
-                    .iter()
-                    .filter_map(|entry| match entry.kind {
-                        SubmissionKind::Drawing { .. } => Some(entry.author_id),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(drawing_authors.len(), count as usize);
+                let mut sorted_prompt_authors = prompt_authors;
+                sorted_prompt_authors.sort_unstable();
+                assert_eq!(sorted_prompt_authors, (1..=count).collect::<Vec<_>>());
+
+                let mut sorted_drawing_authors = drawing_authors;
+                sorted_drawing_authors.sort_unstable();
+                assert_eq!(sorted_drawing_authors, (1..=count).collect::<Vec<_>>());
             }
         }
+    }
+
+    #[test]
+    fn shuffled_player_order_preserves_players_and_can_change_order() {
+        let players = vec![1, 2, 3, 4, 5, 6];
+        let mut rng = StdRng::seed_from_u64(7);
+        let shuffled = shuffled_player_order(&players, &mut rng);
+
+        assert_ne!(shuffled, players);
+
+        let mut sorted_shuffled = shuffled;
+        sorted_shuffled.sort_unstable();
+        assert_eq!(sorted_shuffled, players);
     }
 
     #[test]
@@ -1073,7 +1137,7 @@ mod tests {
     #[test]
     fn leave_is_rejected_after_start() {
         let mut game = game_with_players(2);
-        game.start(1).unwrap();
+        start_in_join_order(&mut game);
 
         assert_eq!(game.leave(2), Err(GameError::AlreadyStarted));
     }
@@ -1086,7 +1150,7 @@ mod tests {
         assert_eq!(game.phase, GamePhase::Cancelled);
 
         let mut game = game_with_players(2);
-        game.start(1).unwrap();
+        start_in_join_order(&mut game);
 
         assert_eq!(game.cancel(1), Err(GameError::AlreadyStarted));
         game.force_cancel(1).unwrap();
@@ -1108,7 +1172,7 @@ mod tests {
     #[test]
     fn text_submissions_are_trimmed_and_capped_at_140_characters() {
         let mut game = game_with_players(2);
-        game.start(1).unwrap();
+        start_in_join_order(&mut game);
 
         let accepted = format!("  {}  ", "a".repeat(140));
         assert_eq!(game.submit_text(1, accepted).unwrap(), Advance::Waiting);
@@ -1127,7 +1191,10 @@ mod tests {
     fn short_game_collects_prompts_then_assigns_each_to_another_player() {
         let mut game = short_game_with_players(3);
 
-        assert_eq!(game.start(1).unwrap(), StartRound::ShortPrompt);
+        assert_eq!(
+            game.start_with_player_order(1, vec![2, 3, 1]).unwrap(),
+            StartRound::ShortPrompt
+        );
         assert_eq!(game.total_rounds(), 2);
         assert_eq!(game.round_kind(), RoundKind::Prompt);
 
@@ -1150,13 +1217,52 @@ mod tests {
             assert_ne!(assignment.player_id, assignment.prompt_author_id);
         }
 
-        assert_eq!(assignments[0].player_id, 1);
-        assert_eq!(assignments[0].prompt_author_id, 3);
-        assert_eq!(assignments[0].prompt, "tiny train");
+        assert_eq!(assignments[0].player_id, 2);
+        assert_eq!(assignments[0].prompt_author_id, 1);
+        assert_eq!(assignments[0].prompt, "sun whale");
 
         game.commit_next_round(1).unwrap();
         assert_eq!(game.round_kind(), RoundKind::Drawing);
         assert_eq!(game.submitted_count(), 0);
+    }
+
+    #[test]
+    fn short_game_drawing_assignments_follow_shuffled_order_not_submission_order() {
+        fn assignments_for_submission_order(order: &[u64]) -> Vec<(u64, u64, String)> {
+            let mut game = short_game_with_players(3);
+            game.start_with_player_order(1, vec![2, 3, 1]).unwrap();
+
+            let mut advance = Advance::Waiting;
+            for player_id in order {
+                advance = game
+                    .submit_text(*player_id, format!("prompt from {player_id}"))
+                    .unwrap();
+            }
+
+            let Advance::ShortDrawingRound { assignments } = advance else {
+                panic!("expected short drawing assignments");
+            };
+
+            assignments
+                .into_iter()
+                .map(|assignment| {
+                    (
+                        assignment.player_id,
+                        assignment.prompt_author_id,
+                        assignment.prompt,
+                    )
+                })
+                .collect()
+        }
+
+        let expected = vec![
+            (2, 1, "prompt from 1".to_owned()),
+            (3, 2, "prompt from 2".to_owned()),
+            (1, 3, "prompt from 3".to_owned()),
+        ];
+
+        assert_eq!(assignments_for_submission_order(&[1, 2, 3]), expected);
+        assert_eq!(assignments_for_submission_order(&[3, 1, 2]), expected);
     }
 
     #[test]
